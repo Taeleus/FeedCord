@@ -290,10 +290,15 @@ namespace FeedCord.Services
 
                 if (response is null)
                 {
-                    throw new Exception();
+                    throw new Exception("No response from URL");
                 }
 
-                response!.EnsureSuccessStatusCode();
+                // Check for success before processing
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("YouTube URL returned HTTP {StatusCode}: {Url}", response.StatusCode, url);
+                    throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
+                }
 
                 var xmlContent = await GetResponseContentAsync(response);
 
@@ -305,13 +310,13 @@ namespace FeedCord.Services
             catch (HttpRequestException ex)
             {
                 _logger.LogWarning(
-                    "Failed to fetch or process the RSS feed from {Url}: Response Ended Prematurely - Skipping Url - Exception Message: {Ex}",
+                    "Failed to fetch feed from {Url}: {Ex}",
                     url, ex);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
-                    "An unexpected error occurred while checking the RSS feed from {Url} - Exception Message: {Ex}",
+                    "An unexpected error occurred while checking the feed from {Url}: {Ex}",
                     url, ex);
             }
 

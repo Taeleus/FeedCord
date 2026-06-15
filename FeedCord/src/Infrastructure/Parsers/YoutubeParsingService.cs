@@ -54,9 +54,21 @@ namespace FeedCord.Infrastructure.Parsers
 
                 if (response is null) return null;
                 
-                response.EnsureSuccessStatusCode();
+                // Check for success status code before processing
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to fetch YouTube feed from {Url}: HTTP {StatusCode}", xmlUrl, response.StatusCode);
+                    return null;
+                }
 
                 var xmlContent = await response.Content.ReadAsStringAsync();
+
+                // Validate content is XML before parsing
+                if (string.IsNullOrWhiteSpace(xmlContent) || !xmlContent.TrimStart().StartsWith("<"))
+                {
+                    _logger.LogWarning("Invalid response from {Url}: Response is not XML", xmlUrl);
+                    return null;
+                }
 
                 var xdoc = XDocument.Parse(xmlContent);
                 if (xdoc.Root == null) return null;
