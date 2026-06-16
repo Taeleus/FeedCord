@@ -57,17 +57,29 @@ namespace FeedCord.Infrastructure.Workers
                 }
                 catch (Exception e)
                 {
-                    _logger.LogCritical("Critical Error in Background Process: {E}", e);
-                    throw;
+                    _logger.LogError(e, "Error in Background Process loop. Continuing to next interval.");
                 }
-
-                
 
                 _logAggregator.SetEndTime(DateTime.Now);
 
-                await _logAggregator.SendToBatchAsync();
+                try
+                {
+                    await _logAggregator.SendToBatchAsync();
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to send batch logs. Continuing to next interval.");
+                }
 
-                await Task.Delay(TimeSpan.FromMinutes(_delayTime), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_delayTime), stoppingToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    // Shutdown requested, exit cleanly
+                    break;
+                }
             }
         }
 
