@@ -12,14 +12,13 @@ namespace FeedCord.Services
 {
     public class FeedManager : IFeedManager
     {
-        private readonly bool _hasAllFilter = false;
-        private readonly bool _hasFilterEnabled = false;
         private readonly Config _config;
         private readonly SemaphoreSlim _instancedConcurrentRequests;
         private readonly ICustomHttpClient _httpClient;
         private readonly ILogAggregator _logAggregator;
         private readonly ILogger<FeedManager> _logger;
         private readonly IRssParsingService _rssParsingService;
+        private readonly IPostFilterService _postFilterService;
         private readonly Dictionary<string, ReferencePost> _lastRunReference;
         private readonly ConcurrentDictionary<string, FeedState> _feedStates;
 
@@ -27,6 +26,7 @@ namespace FeedCord.Services
             Config config,
             ICustomHttpClient httpClient,
             IRssParsingService rssParsingService,
+            IPostFilterService postFilterService,
             ILogger<FeedManager> logger,
             ILogAggregator logAggregator)
         {
@@ -34,18 +34,11 @@ namespace FeedCord.Services
             _httpClient = httpClient;
             _lastRunReference = CsvReader.LoadReferencePosts("feed_dump.csv");
             _rssParsingService = rssParsingService;
+            _postFilterService = postFilterService;
             _logger = logger;
             _logAggregator = logAggregator;
             _feedStates = new ConcurrentDictionary<string, FeedState>();
-            _hasFilterEnabled = config.PostFilters?.Any() ?? false;
             _instancedConcurrentRequests = new SemaphoreSlim(config.ConcurrentRequests);
-
-            //TODO --> this sets flag for 'all' in filters - this and all filter logic needs to be moved out of FeedManager and in to it's own helper/service
-            if (_hasFilterEnabled && _config.PostFilters != null)
-            {
-                if (_config.PostFilters.Any(wf => wf.Url == "all"))
-                    _hasAllFilter = true;
-            }
         }
         public async Task<List<Post>> CheckForNewPostsAsync()
         {
@@ -222,46 +215,14 @@ namespace FeedCord.Services
                         continue;
                     }
 
-                    //TODO --> Implement Filter checking in to a helper/service & remove from FeedManager
-                    if (_hasFilterEnabled && _config.PostFilters != null)
+                    if (_postFilterService.ShouldInclude(post, url))
                     {
-                        var filter = _config.PostFilters.FirstOrDefault(wf => wf.Url == url);
-                        if (filter != null)
-                        {
-                            var filterFound = FilterConfigs.GetFilterSuccess(post, filter.Filters.ToArray());
-
-                            if (filterFound)
-                            {
-                                newPosts.Add(post);
-                            }
-                            else
-                            {
-                                _logger.LogInformation(
-                                    "A new post was omitted because it does not comply to the set filter: {Url}", url);
-                            }
-                        }
-                        else if (_hasAllFilter)
-                        {
-                            var allFilter = _config.PostFilters.FirstOrDefault(wf => wf.Url == "all");
-                            if (allFilter != null)
-                            {
-                                var filterFound = FilterConfigs.GetFilterSuccess(post, allFilter.Filters.ToArray());
-
-                                if (filterFound)
-                                {
-                                    newPosts.Add(post);
-                                }
-                                else
-                                {
-                                    _logger.LogInformation(
-                                        "A new post was omitted because it does not comply to the set filter: {Url}", url);
-                                }
-                            }
-                        }
+                        newPosts.Add(post);
                     }
                     else
                     {
-                        newPosts.Add(post);
+                        _logger.LogInformation(
+                            "A new post was omitted because it does not comply with configured filters: {Url}", url);
                     }
                 }
             }
@@ -273,103 +234,78 @@ namespace FeedCord.Services
         }
         private async Task<List<Post?>> FetchYoutubeAsync(string url)
         {
-            try
+            Post? post;
+
+            // Treat YouTube URLs with embedded xml directly as a feed source.
+            if (url.Contains("xml", StringComparison.OrdinalIgnoreCase))
             {
-                Post? post;
-
-                //TODO --> BETTER HANDLING - TEMP FIX FOR INSERTING XML LINKS IN TO YOUTUBE - WE SKIP PARSING HTML
-                if (url.Contains("xml"))
-                {
-
-                    post = await _rssParsingService.ParseYoutubeFeedAsync(url);
-
-                    return post == null ? new List<Post?>() : new List<Post?> { post };
-                }
-
-                var response = await _httpClient.GetAsyncWithFallback(url);
-
-                if (response is null)
-                {
-                    throw new Exception("No response from URL");
-                }
-
-                // Check for success before processing
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("YouTube URL returned HTTP {StatusCode}: {Url}", response.StatusCode, url);
-                    throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
-                }
-
-                var xmlContent = await GetResponseContentAsync(response);
-
-                post = await _rssParsingService.ParseYoutubeFeedAsync(xmlContent);
-
+                post = await _rssParsingService.ParseYoutubeFeedAsync(url);
                 return post == null ? new List<Post?>() : new List<Post?> { post };
-
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(
-                    "Failed to fetch feed from {Url}: {Ex}",
-                    url, ex);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    "An unexpected error occurred while checking the feed from {Url}: {Ex}",
-                    url, ex);
             }
 
-            return new List<Post?>();
+            using var response = await _httpClient.GetAsyncWithFallback(url);
+
+            if (response is null)
+            {
+                throw new HttpRequestException($"No response from {url}");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YouTube URL returned HTTP {StatusCode}: {Url}", response.StatusCode, url);
+                throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
+            }
+
+            var xmlContent = await GetResponseContentAsync(response);
+            post = await _rssParsingService.ParseYoutubeFeedAsync(xmlContent);
+
+            return post == null ? new List<Post?>() : new List<Post?> { post };
         }
 
         private async Task<List<Post?>> FetchRssAsync(string url, int trim)
         {
+            using var response = await _httpClient.GetAsyncWithFallback(url);
+
+            if (response is null)
+            {
+                throw new HttpRequestException($"No response from {url}");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("RSS URL returned HTTP {StatusCode}: {Url}", response.StatusCode, url);
+                throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
+            }
+
+            var xmlContent = await GetResponseContentAsync(response);
+            return await _rssParsingService.ParseRssFeedAsync(xmlContent, trim);
+        }
+
+        private async Task<string> GetResponseContentAsync(HttpResponseMessage response)
+        {
             try
             {
-
-                var response = await _httpClient.GetAsyncWithFallback(url);
-
-                if (response is null)
+                if (response.Content.Headers.ContentEncoding.Contains("gzip"))
                 {
-                    throw new Exception();
+                    await using var decompressedStream = new GZipStream(await response.Content.ReadAsStreamAsync(), CompressionMode.Decompress);
+                    using var reader = new StreamReader(decompressedStream, Encoding.UTF8);
+                    return await reader.ReadToEndAsync();
                 }
-
-                response.EnsureSuccessStatusCode();
-
-                var xmlContent = await GetResponseContentAsync(response);
-
-                return await _rssParsingService.ParseRssFeedAsync(xmlContent, trim);
-
+                else
+                {
+                    var bytes = await response.Content.ReadAsByteArrayAsync();
+                    return EncodingExtractor.ConvertBytesByComparing(bytes, response.Content.Headers);
+                }
             }
-            catch (HttpRequestException ex)
+            catch (InvalidDataException ex)
             {
-                _logger.LogWarning("Failed to fetch or process the RSS feed from {Url}: {Ex}", url, ex);
+                _logger.LogWarning(ex, "Failed to decode response content from {Url}", response.RequestMessage?.RequestUri);
+                return string.Empty;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("An unexpected error occurred while checking the RSS feed from {Url}: {Ex}", url,
-                    ex);
-            }
-            finally
-            {
-
-            }
-
-            return new List<Post?>();
-        }
-        private async Task<string> GetResponseContentAsync(HttpResponseMessage response)
-        {
-            if (response.Content.Headers.ContentEncoding.Contains("gzip"))
-            {
-                await using var decompressedStream = new GZipStream(await response.Content.ReadAsStreamAsync(), CompressionMode.Decompress);
-                using var reader = new StreamReader(decompressedStream, Encoding.UTF8);
-                return await reader.ReadToEndAsync();
-            }
-            else
-            {
-                var bytes = await response.Content.ReadAsByteArrayAsync();
-                return EncodingExtractor.ConvertBytesByComparing(bytes, response.Content.Headers);
+                _logger.LogWarning(ex, "Failed to read response content from {Url}", response.RequestMessage?.RequestUri);
+                return string.Empty;
             }
         }
 

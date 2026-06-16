@@ -8,6 +8,6 @@
         string Tag,
         DateTime PublishDate,
         string Author,
-        string[] Labels = null
+        string[]? Labels = null
         );
 }

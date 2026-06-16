@@ -16,7 +16,8 @@ namespace FeedCord.Services.Factories
 
         public IFeedManager Create(Config config, ILogAggregator logAggregator)
         {
-            return ActivatorUtilities.CreateInstance<FeedManager>(_serviceProvider, config, logAggregator);
+            var postFilterService = new PostFilterService(config);
+            return ActivatorUtilities.CreateInstance<FeedManager>(_serviceProvider, config, postFilterService, logAggregator);
         }
     }
 }
