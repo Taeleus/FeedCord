@@ -163,6 +163,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <details>
+ <summary>[Unreleased] - 2026-06-16</summary>
+
+### Added
+
+- `PostFilterService` to centralize post filtering logic from configuration
+- `FeedCord.Tests` project to validate feed manager behavior and filtering
+- `FeedManagerTests` covering filter matching, HTTP failures, parse failures, and auto-remove behavior
+
+### Changed
+
+- `FeedManager` now uses `PostFilterService` for filtering and routes failed fetches through `HandleFeedError`
+- Improved RSS and YouTube fetch handling to fail safely on bad or missing HTTP responses
+
+</details>
+
+<details>
  <summary>[3.0.0] - 2025-02-10</summary>
 
 ### Added
