@@ -64,9 +64,13 @@ namespace FeedCord.Infrastructure.Parsers
                 var xmlContent = await response.Content.ReadAsStringAsync();
 
                 // Validate content is XML before parsing
-                if (string.IsNullOrWhiteSpace(xmlContent) || !xmlContent.TrimStart().StartsWith("<"))
+                if (string.IsNullOrWhiteSpace(xmlContent) ||
+                    !xmlContent.Contains("<feed", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning("Invalid response from {Url}: Response is not XML", xmlUrl);
+                    _logger.LogWarning(
+                        "Invalid YouTube feed response from {Url}. Response did not contain an Atom feed.",
+                        xmlUrl);
+
                     return null;
                 }
 

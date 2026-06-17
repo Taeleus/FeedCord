@@ -62,14 +62,31 @@ namespace FeedCord.Services
             }
         }
 
-        public async Task<Post?> ParseYoutubeFeedAsync(string channelUrl)
+        public async Task<Post?> ParseYoutubeFeedAsync(string youtubeInput)
         {
-            var youtubePost = await _youtubeParsingService.GetXmlUrlAndFeed(channelUrl);
-            
+            var youtubePost = await _youtubeParsingService.GetXmlUrlAndFeed(youtubeInput);
+
             if (youtubePost is null)
-                _logger.LogWarning("Failed to parse Youtube Feed from url: {ChannelUrl} - Try directly feeding the xml formatted Url, otherwise could be a malformed feed", channelUrl);
-            
+            {
+                _logger.LogWarning(
+                    "Failed to parse YouTube feed. Input preview: {YoutubeInput}",
+                    SafeForLog(youtubeInput));
+            }
+
             return youtubePost;
+        }
+
+        private static string SafeForLog(string? value, int maxLength = 300)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "<empty>";
+
+            value = value.Replace("\r", " ").Replace("\n", " ").Trim();
+
+            if (value.Length <= maxLength)
+                return value;
+
+            return value[..maxLength] + "... [truncated]";
         }
 
         private string GetRawXmlForItem(FeedItem feedItem)
