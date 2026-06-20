@@ -12,21 +12,21 @@ namespace FeedCord.Services.Helpers
     {
         private static string DecodeContent(string source)
         {
-            
+
             if (string.IsNullOrEmpty(source))
                 return string.Empty;
 
             var decoded = WebUtility.HtmlDecode(source);
-            
+
             //WebUtility Decode apparently parses this inconsistently, so manually converting it here
             decoded = decoded.Replace("&apos;", "'");
-            
+
             //Respects line break encoding
             decoded = LineBreakRegex().Replace(decoded, Environment.NewLine);
-            
+
             var doc = new HtmlDocument();
             doc.LoadHtml(decoded);
-            
+
             return doc.DocumentNode.InnerText;
         }
 
@@ -68,21 +68,21 @@ namespace FeedCord.Services.Helpers
             int trim,
             string imageUrl)
         {
-            if (feed.Link.Contains("reddit.com"))
+            if (feed.Link?.Contains("reddit.com", StringComparison.OrdinalIgnoreCase) == true)
             {
                 return TryBuildRedditPost(post, feed, trim, imageUrl);
             }
-            else if (post.Id.Contains("gitlab.com"))
+            else if (post.Id?.Contains("gitlab.com", StringComparison.OrdinalIgnoreCase) == true)
             {
                 return TryBuildGitlabPost(post, feed, trim, imageUrl);
             }
-            
+
             string title;
             string imageLink;
             string description;
             string link;
             string subtitle;
-            DateTime pubDate;
+            DateTimeOffset pubDate;
 
             // log 
 
@@ -95,11 +95,9 @@ namespace FeedCord.Services.Helpers
                 link = atomItem.Links.FirstOrDefault()?.Href ?? string.Empty;
 
                 subtitle = feed.Title;
-                pubDate = DateTime.TryParse(atomItem.PublishedDate?.ToString(), out var tempDate) 
-                    ? tempDate 
-                    : DateTime.TryParse(atomItem.UpdatedDate?.ToString(), out tempDate) 
-                        ? tempDate 
-                        : default;
+                pubDate = TryParseDate(atomItem.PublishedDate)
+                    ?? TryParseDate(atomItem.UpdatedDate)
+                    ?? default;
             }
             else
             {
@@ -108,32 +106,42 @@ namespace FeedCord.Services.Helpers
                 description = DecodeContent(post.Description);
                 link = post.Link ?? string.Empty;
                 subtitle = feed.Title;
-                pubDate = DateTime.TryParse(post.PublishingDate.ToString(), out var tempDate) ? tempDate : default;
+                pubDate = TryParseDate(post.PublishingDate) ?? default;
             }
 
             var author = TryGetAuthor(post);
-            
+
             var decTitle = DecodeContent(title);
             var decSubtitle = DecodeContent(subtitle);
             var decAuthor = DecodeContent(author);
 
-            if (trim == 0) 
-                return new Post(title, imageLink, description, link, subtitle, pubDate, author, Array.Empty<string>());
-            
+            if (trim == 0)
+                return new Post(
+                    title,
+                    imageLink,
+                    description,
+                    link,
+                    subtitle,
+                    pubDate,
+                    author,
+                    Array.Empty<string>(),
+                    GetItemId(post));
+
             if (description.Length > trim)
             {
                 description = string.Concat(description.AsSpan(0, trim), "...");
             }
-            
+
             return new Post(
                 decTitle,
-                imageLink, 
-                description, 
-                link, 
-                decSubtitle, 
-                pubDate, 
+                imageLink,
+                description,
+                link,
+                decSubtitle,
+                pubDate,
                 decAuthor,
-                Array.Empty<string>());
+                Array.Empty<string>(),
+                GetItemId(post));
         }
 
         private static Post TryBuildGitlabPost(
@@ -147,7 +155,7 @@ namespace FeedCord.Services.Helpers
             var description = DecodeContent(post.Description ?? string.Empty);
             var subtitle = feed.Title;
             var author = string.Empty;
-            var pubDate = DateTime.TryParse(post.PublishingDate.ToString(), out var fallbackDate) ? fallbackDate : default;
+            var pubDate = TryParseDate(post.PublishingDate) ?? default;
             var labels = Array.Empty<string>();
 
             // Simple approach: Parse labels directly from raw XML
@@ -167,11 +175,9 @@ namespace FeedCord.Services.Helpers
                 // Extract other fields from atom item if available
                 title = atomItem.Title ?? title;
                 author = TryGetAuthor(post);
-                pubDate = DateTime.TryParse(atomItem.PublishedDate?.ToString(), out var tempDate) 
-                    ? tempDate 
-                    : DateTime.TryParse(atomItem.UpdatedDate?.ToString(), out tempDate) 
-                        ? tempDate 
-                        : pubDate;
+                pubDate = TryParseDate(atomItem.PublishedDate)
+                    ?? TryParseDate(atomItem.UpdatedDate)
+                    ?? pubDate;
             }
 
             // trim description
@@ -188,7 +194,8 @@ namespace FeedCord.Services.Helpers
                 Tag: subtitle,
                 PublishDate: pubDate,
                 Author: author,
-                Labels: labels
+                Labels: labels,
+                ItemId: GetItemId(post)
             );
         }
 
@@ -204,8 +211,8 @@ namespace FeedCord.Services.Helpers
             var description = DecodeContent(post.Description ?? string.Empty);
             var subtitle = feed.Title;
             var author = string.Empty;
-            var pubDate = DateTime.MinValue;
-            
+            var pubDate = DateTimeOffset.MinValue;
+
             if (post.SpecificItem is AtomFeedItem { Element: not null } atomItem)
             {
                 title = atomItem.Title;
@@ -238,20 +245,20 @@ namespace FeedCord.Services.Helpers
                 }
                 else
                 {
-                    if (post.Description != null) 
+                    if (post.Description != null)
                         description = DecodeContent(post.Description);
                 }
-                
+
                 var altLink = atomItem.Links
                     .FirstOrDefault(l => l.Relation == "alternate")
                     ?? atomItem.Links.FirstOrDefault();
 
                 if (altLink != null && !string.IsNullOrWhiteSpace(altLink.Href))
                     link = altLink.Href;
-                
+
                 var parsedDate = atomItem.PublishedDate;
 
-                pubDate = parsedDate ?? DateTime.Now;
+                pubDate = TryParseDate(parsedDate) ?? DateTimeOffset.UtcNow;
             }
 
             if (!string.IsNullOrEmpty(author) && author.StartsWith("/u/", StringComparison.OrdinalIgnoreCase))
@@ -259,12 +266,12 @@ namespace FeedCord.Services.Helpers
                 var pattern = $@"\s*submitted by\s*{Regex.Escape(author)}\s*\[link\]\s*\[comments\]\s*";
                 description = Regex.Replace(description, pattern, string.Empty, RegexOptions.IgnoreCase);
             }
-            
+
             if (trim > 0 && description.Length > trim)
             {
                 description = description[..trim] + "...";
             }
-            
+
             return new Post(
                 Title: title,
                 ImageUrl: imageLink,
@@ -273,14 +280,34 @@ namespace FeedCord.Services.Helpers
                 Tag: subtitle,
                 PublishDate: pubDate,
                 Author: author,
-                Labels: Array.Empty<string>()
+                Labels: Array.Empty<string>(),
+                ItemId: GetItemId(post)
             );
+        }
+
+        private static string? GetItemId(FeedItem post)
+        {
+            return string.IsNullOrWhiteSpace(post.Id) ? post.Link : post.Id;
+        }
+
+        private static DateTimeOffset? TryParseDate(DateTime? value)
+        {
+            if (value is null)
+                return null;
+
+            var date = value.Value;
+            return date.Kind switch
+            {
+                DateTimeKind.Utc => new DateTimeOffset(date),
+                DateTimeKind.Local => new DateTimeOffset(date).ToUniversalTime(),
+                _ => new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Utc))
+            };
         }
 
         private static string ParseFirstImageFromHtml(string html)
         {
             var match = HtmlRegex().Match(html);
-            
+
             return match.Success ? match.Groups["src"].Value : string.Empty;
         }
 

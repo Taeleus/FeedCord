@@ -1,337 +1,261 @@
-﻿
-![FeedCord Banner](https://github.com/Qolors/FeedCord/blob/master/FeedCord/docs/images/FeedCord.png)
----
+![FeedCord banner](FeedCord/docs/images/FeedCord.png)
 
-# FeedCord: Self-hosted RSS Reader for Discord
+# FeedCord
 
-FeedCord is designed to be a 'turn key' automated RSS feed reader with the main focus on Discord Servers. 
+FeedCord is a self-hosted RSS, Atom, and YouTube feed reader that publishes new items to Discord text or forum channels through webhooks.
 
-Use it for increasing community engagement and activity or just for your own personal use. The combination of FeedCord and Discord's Forum Channels can really shine to make a vibrant news feed featuring gallery-style display alongside custom threads, creating an engaging space for your private community discussions.
+This repository is the Taeleus fork of [Qolors/FeedCord](https://github.com/Qolors/FeedCord). It focuses on reliable delivery, durable checkpoints, strict configuration validation, and predictable operation.
 
-### An example of what FeedCord can bring to your server
+## Features
 
----
+- RSS 2.0, Atom, Reddit, GitLab, and YouTube feed support
+- Discord text-channel and forum-channel webhooks
+- Multiple independent feed instances in one process
+- Embed or Markdown output
+- Per-feed and global post filters
+- Image extraction from feed metadata and linked pages
+- Global and per-instance request limits
+- Discord rate-limit handling
+- Durable, per-instance delivery checkpoints
+- Automatic migration from the legacy `feed_dump.csv` format
+- Multi-architecture container images for `linux/amd64` and `linux/arm64`
 
-![FeedCord Gallery 1](https://github.com/Qolors/FeedCord/blob/master/FeedCord/docs/images/gallery1.png)
+![FeedCord gallery example](FeedCord/docs/images/gallery1.png)
 
-![FeedCord Gallery 2](https://github.com/Qolors/FeedCord/blob/master/FeedCord/docs/images/gallery2.png)
+## Delivery behavior
 
-A showing of one channel. Run as many of these as you want!
+FeedCord checkpoints a feed only after Discord accepts the complete batch of new posts from that feed.
 
+This provides at-least-once delivery:
 
----
+- Failed Discord deliveries are retried during the next feed check.
+- Posts are not silently discarded when Discord is unavailable.
+- A crash after Discord accepts a post but before its checkpoint is saved can produce a duplicate.
 
-## Running FeedCord
+Checkpoints use UTC publication times and stable feed-item IDs. Separate posts that share the same publication timestamp are therefore processed independently.
 
-FeedCord is very simple to get up and running. It only takes a few steps:
+## Requirements
 
-- Create a Discord Webhook
-- Create and Edit a local file or two
+Choose one:
 
-Provided below is a quick guide to get up and running.
+- Docker or another OCI-compatible container runtime
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) for source builds
 
+You also need:
 
-## Quick Setup
+- A Discord webhook
+- At least one RSS, Atom, or YouTube feed
+- A writable state directory when persistence is enabled
 
-### 1. Create a new folder with a new file named `appsettings.json` inside with the following content:
+## Configuration
+
+Create an `appsettings.json` file:
 
 ```json
 {
   "Instances": [
     {
-      "Id": "My First News Feed",
-      "YoutubeUrls": [
-        ""
-      ],
+      "Id": "Engineering News",
       "RssUrls": [
-        ""
+        "https://github.com/Taeleus/FeedCord/releases.atom"
       ],
-      "Forum": false,
-      "DiscordWebhookUrl": "...",
-      "RssCheckIntervalMinutes": 25,
-      "EnableAutoRemove": false,
+      "YoutubeUrls": [],
+      "DiscordWebhookUrl": "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN",
+      "RssCheckIntervalMinutes": 15,
+      "DescriptionLimit": 500,
       "Color": 8411391,
-      "DescriptionLimit": 250,
+      "Forum": false,
       "MarkdownFormat": false,
-      "PersistenceOnShutdown": true
+      "PersistenceOnShutdown": true,
+      "EnableAutoRemove": false,
+      "ConcurrentRequests": 5
     }
   ],
-  "ConcurrentRequests": 40
+  "ConcurrentRequests": 20
 }
 ```
-There is currently 17 properties you can configure. You can read more in depth explanation of the file structure as well as view all properties and their purpose [here](https://github.com/Qolors/FeedCord/blob/master/FeedCord/docs/reference.md)
 
----
+Important constraints:
 
-### 2. Create a new Webhook in Discord (Visual Steps Provided)
+- `Id` must identify the instance.
+- `RssUrls` and `YoutubeUrls` must both exist; use an empty array when unused.
+- At least one feed URL must be configured.
+- Feed URLs must use HTTP or HTTPS.
+- `DiscordWebhookUrl` must be an HTTPS Discord webhook URL.
+- `RssCheckIntervalMinutes` must be between 1 and 1440.
+- `DescriptionLimit` must be between 0 and 4096.
+- Global and per-instance `ConcurrentRequests` must be between 1 and 100.
 
-![Discord Webhook](https://github.com/Qolors/FeedCord/blob/master/FeedCord/docs/images/webhooks.png)
+See the complete [configuration reference](FeedCord/docs/reference.md) for optional appearance settings, filters, and multi-instance examples.
 
+### YouTube feeds
 
-### Quick Note
+Direct YouTube Atom URLs are the most reliable option:
 
-Be sure to populate your `appsettings.json` *"DiscordWebhookUrl"* property with your newly created Webhook
+```text
+https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID
+```
 
-Before you actually run FeedCord, make sure you have populated your `appsettings.json` with RSS and YouTube feeds.
-
-**RSS Feeds**
-
-- For new users that aren't bringing their own list check out [awesome-rss-feeds](https://github.com/plenaryapp/awesome-rss-feeds) and add some that interest you
-- Each url is entered by line seperating by comma. It should look like this in your `appsettings.json` file:
+Channel-page URLs are also supported when the page exposes its feed link:
 
 ```json
-"RssUrls": [
-       "https://examplesrssfeed1.com/rss",
-       "https://examplesrssfeed2.com/rss",
-       "https://examplesrssfeed3.com/rss",
-     ]
+{
+  "YoutubeUrls": [
+    "https://www.youtube.com/@ExampleChannel"
+  ]
+}
 ```
 
-**YouTube Feeds**
+### Post filters
 
-- You can bring your favorite YouTube channels as well to be notified of new uploads
-- FeedCord parses from the channel's base url so simply navigate to the channel home page and use that url.
-- Example here if I was interested in Unbox Therapy & Tyler1:
-
-***NOTE***
-
-If a YouTube link keeps failing at retrieving the RSS Link - Directly use the xml formatted YouTube link. It is more reliable.
-
-The format for that looks like: `"https://www.youtube.com/feeds/videos.xml?channel_id={YOUR_CHANNEL_ID_HERE}"`
-
-You can use online web tools like [tunepocket](https://www.tunepocket.com/youtube-channel-id-finder/?srsltid=AfmBOorSH1Ye9r1erCzY2qaqV_pUa23U8wG-DeAMAhGfGZ9dbMY5RE2j) to get the Id for the channel.
+Plain filters match a post's title or description. Prefix a filter with `label:` to match an exact feed label. An exact URL filter takes precedence over an `"all"` filter.
 
 ```json
-"YoutubeUrls": [
-       "https://www.youtube.com/@unboxtherapy",
-       "https://www.youtube.com/@TYLER1LOL",
-       "https://www.youtube.com/feeds/videos.xml?channel_id={YOUR_CHANNEL_ID_HERE}"
-     ]
+{
+  "PostFilters": [
+    {
+      "Url": "https://github.com/Taeleus/FeedCord/releases.atom",
+      "Filters": [
+        "release",
+        "label:security"
+      ]
+    },
+    {
+      "Url": "all",
+      "Filters": [
+        "announcement"
+      ]
+    }
+  ]
+}
 ```
 
-### Running FeedCord
+Posts rejected by a filter are checkpointed without being sent, so they are not repeatedly reconsidered.
 
-Now that your file is set up, you have two ways to run FeedCord
+## Run with Docker
 
-### Docker (Recommended)
+Pull the current stable image:
 
-```
-docker pull qolors/feedcord:latest
-```
-Be sure to update the volume path to your `appsettings.json` 
-```
-docker run --name FeedCord -v "/path/to/your/appsettings.json:/app/config/appsettings.json" qolors/feedcord:latest
+```bash
+docker pull taeleus/feedcord:latest
 ```
 
-### Build From Source
+Run FeedCord with a read-only configuration file and persistent state directory:
 
-Install the [.NET SDK](dotnet.microsoft.com/download)
+```bash
+docker run --name feedcord \
+  --restart unless-stopped \
+  -v "/absolute/path/appsettings.json:/app/config/appsettings.json:ro" \
+  -v "/absolute/path/feedcord-state:/app/state" \
+  taeleus/feedcord:latest
+```
 
-Clone this repo
-```
-git clone https://github.com/Qolors/FeedCord
-```
-Change Directory
-```
+Available image tags:
+
+- `latest`: current `master` build
+- `beta`: current `development` build
+- Commit SHA tags for immutable deployments
+
+The state mount is required if `PersistenceOnShutdown` is enabled and checkpoints must survive container replacement.
+
+## Run from source
+
+```bash
+git clone https://github.com/Taeleus/FeedCord.git
 cd FeedCord
-```
-Restore Dependencies
-```
-dotnet restore
-```
-Build
-```
-dotnet build
-```
-Run with your `appsettings.json` (provide your own path)
-```
-dotnet run -- path\to\your\appsettings.json
+dotnet restore FeedCord.sln
+dotnet run --project FeedCord -- /absolute/path/appsettings.json
 ```
 
+If no configuration path is supplied, FeedCord looks for:
 
-With the above steps completed, FeedCord should now be running and posting updates from your RSS feeds directly to your Discord channel.
+```text
+FeedCord/bin/<configuration>/net9.0/config/appsettings.json
+```
 
-<a href="https://www.buymeacoffee.com/Qolors" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+For local development, passing an explicit path is generally clearer.
 
----
+## State and migration
 
-# Changelog
+Persistent delivery state is stored at:
 
-All notable changes to this project will be documented in this file.
+```text
+state/feed-state.json
+```
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The file contains separate checkpoints for each configured instance and is replaced atomically when saved.
 
-<details>
- <summary>[Unreleased] - 2026-06-16</summary>
+If a legacy `feed_dump.csv` file exists and no JSON state file has been created, FeedCord imports the legacy timestamps. The next successful save writes the new JSON format.
 
-### Added
+If the JSON state file is malformed, FeedCord:
 
-- `PostFilterService` to centralize post filtering logic from configuration
-- `FeedCord.Tests` project to validate feed manager behavior and filtering
-- `FeedManagerTests` covering filter matching, HTTP failures, parse failures, and auto-remove behavior
+1. Logs the load failure.
+2. Preserves a copy with a `.corrupt-<timestamp>` suffix.
+3. Starts with an empty checkpoint set.
 
-### Changed
+Starting with empty checkpoints intentionally avoids replaying the current contents of newly configured feeds.
 
-- `FeedManager` now uses `PostFilterService` for filtering and routes failed fetches through `HandleFeedError`
-- Improved RSS and YouTube fetch handling to fail safely on bad or missing HTTP responses
+## Discord behavior
 
-</details>
+- HTTP `429` responses honor Discord's `retry_after` value.
+- FeedCord retries rate-limited webhook requests up to three times.
+- A `400 Bad Request` triggers one text/forum payload fallback to detect an incorrect `Forum` setting.
+- Webhook IDs and tokens are redacted from application-generated URL logs.
+- Discord field lengths are clamped to API limits.
 
-<details>
- <summary>[3.0.0] - 2025-02-10</summary>
+## Testing
 
-### Added
+Run the complete unit and fixture suite:
 
-- Restart persistence to catch up on missed posts if it had shutdown
-- UserAgent cycling for failed get requests with retry attempts
-- Multiple retry attempts on getting a post image
-- Control over allowed concurrent HTTP requests FeedCord can make
-- Separate handling of Reddit Feeds
-- Markdown Support
-- Building from source
+```bash
+dotnet test FeedCord.sln --configuration Release
+```
 
-### Changed
+Run the same validation sequence used by CI:
 
-- README
-- Large codebase refactoring
+```bash
+dotnet restore FeedCord.sln
+dotnet format FeedCord.sln --no-restore --verify-no-changes
+dotnet build FeedCord.sln --configuration Release --no-restore -warnaserror
+dotnet test FeedCord.sln --configuration Release --no-restore --no-build
+```
 
-### Fixed
+The suite includes RSS, Atom, and YouTube fixtures; delivery and same-timestamp deduplication checks; rate-limit and cancellation tests; configuration validation; and concurrent/corrupt-state coverage.
 
-- Atom Feeds not returning a description
-- Failed posting to Discord due to title length
+### Optional Discord integration test
 
-</details>
+Set `FEEDCORD_TEST_DISCORD_WEBHOOK` to a disposable text-channel webhook before running the test suite:
 
-<details>
- <summary>[2.1.1] - 2024-04-25</summary>
+```powershell
+$env:FEEDCORD_TEST_DISCORD_WEBHOOK = "https://discord.com/api/webhooks/..."
+dotnet test FeedCord.sln --configuration Release
+```
 
- ### Added
+```bash
+export FEEDCORD_TEST_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+dotnet test FeedCord.sln --configuration Release
+```
 
- - Added author being sourced from feed items
- - Added GZIP support for feeds
- 
-</details>
+The integration test posts one message. It does not print the webhook credential.
 
+## Updating an existing installation
 
-<details>
- <summary>[2.1.0] - 2024-02-28</summary>
+1. Stop the existing FeedCord process or container.
+2. Back up `appsettings.json`, `feed_dump.csv`, and the `state` directory if present.
+3. Replace the application or image.
+4. Ensure `/app/state` is mounted for container deployments.
+5. Start FeedCord and confirm that all configured instances pass validation.
 
- ### Added
- 
- - Added Support for grabbing multiple new posts if the feed has multiple new posts since the last check.
+The first run can migrate `feed_dump.csv`. Keep the backup until the new `state/feed-state.json` file has been created successfully.
 
- ### Changed
- 
- - Improved Documentation for easier setup and understanding
- - Improved Logging for better readability
- - Posting now has a hard-coded 10 second buffer so large feeds respect Discord's rate limits
+## Security notes
 
-</details>
+- Treat Discord webhook URLs as credentials.
+- Do not commit `appsettings.json`.
+- Prefer a read-only configuration mount.
+- Restrict access to the state directory and application logs.
+- Use a disposable webhook for integration testing.
 
+## License
 
-<details>
-  <summary>[2.0.1] - 2024-02-19</summary>
-
-  ### Added
-
-  - Added Support for Reddit Feed & Better Atom Parsing Feeds
-
-</details>
-
-<details>
-  <summary>[2.0.0] - 2024-01-30</summary>
-
-  ### Added
-
-  - Added Support for Multiple Webhook Urls & Configurations
-  - Added Support for Discord's Forum Channels
-  
-  ### Changed
-
-  - Configuration File formatting has changed to support multiple Webhook URLs
-  - Slight improvements to Logging
-  - Some Configuration properties are now optional rather than required
-
-</details>
-
-
-<details>
-  <summary>[1.3.0] - 2024-01-20</summary>
-
-  ### Added
-
-  - Added Description Length Configuration
-
-  ### Changed
-
-  - Improved RSS & ATOM Parsing with implementing [FeedReader](https://github.com/arminreiter/FeedReader) library
-
-  ### Fixed
-
-  - RSS/ATOM Feeds returning errors because of parsing issues
-
-</details>
-
-
-<details>
-  <summary>[1.2.1] - 2024-01-17</summary>
-
-  ### Changed
-
-  - Made Youtube URLs an optional addition rather than required
-
-</details>
-
-<details>
-  <summary>[1.2.0] - 2023-10-25</summary>
-  
-  ### Added
-
-  - Added Support for Youtube Channel Feeds in configuration file.
-  - Added an optional Auto Remove option in configuration file for bad URL Feeds to get booted out of the list after multiple failed attempts.
-
-  ### Changed
-
-  - Improved container logging messages for better readability.
-
-  ### Fixed
-
-  - Color setting in configuration now properly works for the embed message
-  - Fixed the handling of errors and removed from logging to reduce spam.
-  - Fixed a known logging index error.
-
-</details>
-
-<details>
-  <summary>[1.1.0] - 2023-10-16</summary>
-  
-  ### Added
-
-  - Broke up `RssProcessorService` class to follow SOLID principles, adding a new service class `OpenGraphService` to handle meta tags.
-  - Added `Helper` namespace & `StringHelper` class, which includes the `StripTags` method for potential reuse and improved organization.
-
-  ### Changed
-
-  - Enhanced the RSS feed background service for more efficient feed checks, reducing chances of delays.
-  - Customized the `HttpClient` to set default request headers, ensuring better compatibility with certain RSS feeds.
-  - Refined feed processing logic to include concurrent processing, beneficial for users with a large number of RSS feeds.
-  - ReadMe to show this change log and multiple OS images.
-
-  ### Fixed
-
-  - Improved RSS feed initialization, ensuring only valid feeds are added to the tracking list.
-  - Overhauled logs to not contain as much spam and allow for better readability.
-
-</details>
-
-<details>
-  <summary>[1.0.0] - 2023-10-15</summary>
-  
-  ### Added
-  - Initial Project Release
-
-</details>
-
-
----
+FeedCord is licensed under the [MIT License](LICENSE).

@@ -2,14 +2,12 @@
 using FeedCord.Core.Interfaces;
 using System.Text;
 using System.Text.Json;
-using System.Net.Http;
 
 namespace FeedCord.Core
 {
-    //TODO --> Eventually Define data classes
     public class DiscordPayloadService : IDiscordPayloadService
     {
-        private Config _config;
+        private readonly Config _config;
 
         public DiscordPayloadService(Config config)
         {
@@ -20,7 +18,7 @@ namespace FeedCord.Core
         {
             if (_config.MarkdownFormat)
                 return GenerateMarkdown(post);
-            
+
             var payload = new
             {
                 username = _config.Username ?? "FeedCord",
@@ -29,19 +27,11 @@ namespace FeedCord.Core
                 {
                     new
                     {
-                        title = post.Title,
-                        author = new
-                        {
-                            name = _config.AuthorName ?? post.Author,
-                            url = _config.AuthorUrl ?? "",
-                            icon_url = _config.AuthorIcon ?? ""
-                        },
+                        title = Truncate(post.Title, 256),
+                        author = BuildAuthor(_config.AuthorName ?? post.Author),
                         url = post.Link,
-                        description = post.Description,
-                        image = new
-                        {
-                            url = string.IsNullOrEmpty(post.ImageUrl) ? _config.FallbackImage ?? "" : post.ImageUrl,
-                        },
+                        description = Truncate(post.Description, 4096),
+                        image = BuildImage(post.ImageUrl),
                         footer = new
                         {
                             text = $"{post.Tag} - {post.PublishDate:MM/dd/yyyy h:mm tt}",
@@ -65,29 +55,19 @@ namespace FeedCord.Core
         {
             if (_config.MarkdownFormat)
                 return GenerateMarkdown(post);
-            
-            object? payload = null;
-            
-            payload = new
+
+            var payload = new
             {
-                content = post.Tag,
+                content = Truncate(post.Tag, 2000),
                 embeds = new[]
                 {
                     new
                     {
-                        title = post.Title,
-                        author = new
-                        {
-                            name = post.Author,
-                            url = _config.AuthorUrl ?? "",
-                            icon_url = _config.AuthorIcon ?? ""
-                        },
+                        title = Truncate(post.Title, 256),
+                        author = BuildAuthor(_config.AuthorName ?? post.Author),
                         url = post.Link,
-                        description = post.Description,
-                        image = new
-                        {
-                            url = string.IsNullOrEmpty(post.ImageUrl) ? _config.FallbackImage ?? "" : post.ImageUrl,
-                        },
+                        description = Truncate(post.Description, 4096),
+                        image = BuildImage(post.ImageUrl),
                         footer = new
                         {
                             text = $"{post.Tag} - {post.PublishDate:MM/dd/yyyy h:mm tt}",
@@ -96,7 +76,7 @@ namespace FeedCord.Core
                         color = _config.Color,
                     }
                 },
-                thread_name = post.Title.Length > 100 ? post.Title[..99] : post.Title
+                thread_name = Truncate(post.Title, 100)
             };
 
             var payloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -107,7 +87,7 @@ namespace FeedCord.Core
 
             return new StringContent(payloadJson, Encoding.UTF8, "application/json");
         }
-        
+
         private StringContent GenerateMarkdown(Post post)
         {
             var markdownPost = $"""
@@ -122,33 +102,58 @@ namespace FeedCord.Core
                                 [Source]({post.Link})
 
                                 """;
-            object? payload = null;
-            
+            object payload;
+
             if (_config.Forum)
             {
                 payload = new
                 {
-                    content = markdownPost,
-                    thread_name = post.Title.Length > 100 ? 
-                        post.Title[..99] : 
-                        post.Title
+                    content = Truncate(markdownPost, 2000),
+                    thread_name = Truncate(post.Title, 100)
                 };
             }
             else
             {
                 payload = new
                 {
-                    content = markdownPost
+                    content = Truncate(markdownPost, 2000)
                 };
             }
-            
+
             var payloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions
             {
                 DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
-            
+
             return new StringContent(payloadJson, Encoding.UTF8, "application/json");
+        }
+
+        private object? BuildAuthor(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return null;
+
+            return new
+            {
+                name = Truncate(name, 256),
+                url = _config.AuthorUrl,
+                icon_url = _config.AuthorIcon
+            };
+        }
+
+        private object? BuildImage(string? postImageUrl)
+        {
+            var imageUrl = string.IsNullOrWhiteSpace(postImageUrl) ? _config.FallbackImage : postImageUrl;
+            return string.IsNullOrWhiteSpace(imageUrl) ? null : new { url = imageUrl };
+        }
+
+        private static string Truncate(string? value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            return value.Length <= maxLength ? value : value[..maxLength];
         }
     }
 }

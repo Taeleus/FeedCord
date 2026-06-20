@@ -8,10 +8,10 @@ public class LogAggregator : ILogAggregator
 {
     private IBatchLogger _batchLogger;
     public ConcurrentDictionary<string, int> UrlStatuses { get; set; } = new ConcurrentDictionary<string, int>();
-    public ConcurrentDictionary<string, Post?> LatestPosts  { get; set; } = new ConcurrentDictionary<string, Post?>();
+    public ConcurrentDictionary<string, Post?> LatestPosts { get; set; } = new ConcurrentDictionary<string, Post?>();
     public string InstanceId { get; set; }
-    public DateTime StartTime { get; set; }
-    public DateTime EndTime { get; set; }
+    public DateTimeOffset StartTime { get; set; }
+    public DateTimeOffset EndTime { get; set; }
     public Post? LatestPost { get; set; }
     public int NewPostCount { get; set; } = 0;
     public LogAggregator(IBatchLogger batchLogger, Config config)
@@ -25,12 +25,12 @@ public class LogAggregator : ILogAggregator
         await _batchLogger.ConsumeLogData(this);
     }
 
-    public void SetStartTime(DateTime startTime)
+    public void SetStartTime(DateTimeOffset startTime)
     {
         StartTime = startTime;
     }
 
-    public void SetEndTime(DateTime endTime)
+    public void SetEndTime(DateTimeOffset endTime)
     {
         EndTime = endTime;
     }

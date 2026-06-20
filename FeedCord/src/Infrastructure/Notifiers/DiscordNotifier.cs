@@ -17,20 +17,17 @@ namespace FeedCord.Infrastructure.Notifiers
             _webhook = config.DiscordWebhookUrl;
             _forum = config.Forum;
         }
-        public async Task SendNotificationsAsync(List<Post> newPosts)
+        public async Task<bool> SendNotificationAsync(Post post, CancellationToken cancellationToken = default)
         {
-            foreach (var post in newPosts)
-            {
-                // TODO --> This is to dynamically handle users setting the forum flag to true or false incorrectly
-                // May revisit when config setup is more robust
-                var forumChannelContent = _discordPayloadService.BuildForumWithPost(post);
-                var textChannelContent = _discordPayloadService.BuildPayloadWithPost(post);
+            using var forumChannelContent = _discordPayloadService.BuildForumWithPost(post);
+            using var textChannelContent = _discordPayloadService.BuildPayloadWithPost(post);
 
-                await _httpClient.PostAsyncWithFallback(_webhook, forumChannelContent, textChannelContent, _forum);
-
-                // TODO --> This is to prevent rate limiting from Discord API - Simple but eventually want to handle this in our CustomHttpClient
-                await Task.Delay(10000);
-            }
+            return await _httpClient.PostAsyncWithFallback(
+                _webhook,
+                forumChannelContent,
+                textChannelContent,
+                _forum,
+                cancellationToken);
         }
     }
 }

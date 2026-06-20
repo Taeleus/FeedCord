@@ -5,10 +5,40 @@ on:
     branches:
       - development
       - master
+  pull_request:
+    branches:
+      - development
+      - master
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore FeedCord.sln
+
+      - name: Verify formatting
+        run: dotnet format FeedCord.sln --no-restore --verify-no-changes
+
+      - name: Build
+        run: dotnet build FeedCord.sln --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test FeedCord.sln --configuration Release --no-restore --no-build
+
   docker:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:

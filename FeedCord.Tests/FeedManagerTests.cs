@@ -28,7 +28,7 @@ namespace FeedCord.Tests
             };
 
             var service = new PostFilterService(config);
-            var post = new Post("Title", "image", "description", "link", "tag", DateTime.UtcNow, "author", Array.Empty<string>());
+            var post = new Post("Title", "image", "description", "link", "tag", DateTimeOffset.UtcNow, "author", Array.Empty<string>());
 
             Assert.True(service.ShouldInclude(post, "https://example.com/rss"));
         }
@@ -58,7 +58,7 @@ namespace FeedCord.Tests
             };
 
             var service = new PostFilterService(config);
-            var post = new Post("Title", "image", "description", "link", "tag", DateTime.UtcNow, "author", new[] { "tag" });
+            var post = new Post("Title", "image", "description", "link", "tag", DateTimeOffset.UtcNow, "author", new[] { "tag" });
 
             Assert.True(service.ShouldInclude(post, "https://example.com/rss"));
         }
@@ -88,7 +88,7 @@ namespace FeedCord.Tests
             };
 
             var service = new PostFilterService(config);
-            var post = new Post("Title", "image", "description", "link", "tag", DateTime.UtcNow, "author", Array.Empty<string>());
+            var post = new Post("Title", "image", "description", "link", "tag", DateTimeOffset.UtcNow, "author", Array.Empty<string>());
 
             Assert.True(service.ShouldInclude(post, "https://example.com/rss"));
         }
@@ -111,7 +111,9 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
@@ -156,15 +158,21 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
                 });
 
-            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTime.Now.AddSeconds(1), "author", new[] { "tag" });
+            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTimeOffset.UtcNow.AddSeconds(1), "author", new[] { "tag" });
             var rssParsingServiceMock = new Mock<IRssParsingService>();
-            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(It.IsAny<string>(), It.IsAny<int>())).ReturnsAsync(new List<Post?> { post });
+            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Post?> { post });
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();
@@ -176,7 +184,7 @@ namespace FeedCord.Tests
             var newPosts = await feedManager.CheckForNewPostsAsync();
 
             Assert.Single(newPosts);
-            Assert.Equal(post, newPosts[0]);
+            Assert.Equal(post, newPosts[0].Post);
         }
 
         [Fact]
@@ -204,15 +212,21 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
                 });
 
-            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTime.Now.AddSeconds(1), "author", new[] { "tag" });
+            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTimeOffset.UtcNow.AddSeconds(1), "author", new[] { "tag" });
             var rssParsingServiceMock = new Mock<IRssParsingService>();
-            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(It.IsAny<string>(), It.IsAny<int>())).ReturnsAsync(new List<Post?> { post });
+            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Post?> { post });
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();
@@ -223,7 +237,8 @@ namespace FeedCord.Tests
             await feedManager.InitializeUrlsAsync();
             var newPosts = await feedManager.CheckForNewPostsAsync();
 
-            Assert.Empty(newPosts);
+            var pendingPost = Assert.Single(newPosts);
+            Assert.False(pendingPost.ShouldNotify);
         }
 
         [Fact]
@@ -244,7 +259,9 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync((System.Net.Http.HttpResponseMessage?)null);
 
             var rssParsingServiceMock = new Mock<IRssParsingService>();
@@ -278,14 +295,20 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
                 });
 
             var rssParsingServiceMock = new Mock<IRssParsingService>();
-            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(It.IsAny<string>(), It.IsAny<int>())).ThrowsAsync(new System.Exception("parse failed"));
+            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new System.Exception("parse failed"));
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();
@@ -317,14 +340,19 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
                 });
 
             var rssParsingServiceMock = new Mock<IRssParsingService>();
-            rssParsingServiceMock.Setup(x => x.ParseYoutubeFeedAsync(It.IsAny<string>())).ReturnsAsync((Post?)null);
+            rssParsingServiceMock.Setup(x => x.ParseYoutubeFeedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Post?)null);
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();
@@ -363,15 +391,21 @@ namespace FeedCord.Tests
             };
 
             var httpClientMock = new Mock<ICustomHttpClient>();
-            httpClientMock.Setup(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.Setup(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new System.Net.Http.StringContent("<rss></rss>")
                 });
 
-            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTime.Now.AddSeconds(1), "author", new[] { "tag" });
+            var post = new Post("Title", "image", "description", "https://example.com/post", "tag", DateTimeOffset.UtcNow.AddSeconds(1), "author", new[] { "tag" });
             var rssParsingServiceMock = new Mock<IRssParsingService>();
-            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(It.IsAny<string>(), It.IsAny<int>())).ReturnsAsync(new List<Post?> { post });
+            rssParsingServiceMock.Setup(x => x.ParseRssFeedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<Post?> { post });
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();
@@ -383,7 +417,7 @@ namespace FeedCord.Tests
             var newPosts = await feedManager.CheckForNewPostsAsync();
 
             Assert.Single(newPosts);
-            Assert.Equal(post, newPosts[0]);
+            Assert.Equal(post, newPosts[0].Post);
         }
 
         [Fact]
@@ -410,7 +444,9 @@ namespace FeedCord.Tests
                 Content = new System.Net.Http.StringContent("<rss></rss>")
             };
 
-            httpClientMock.SetupSequence(x => x.GetAsyncWithFallback(It.IsAny<string>()))
+            httpClientMock.SetupSequence(x => x.GetAsyncWithFallback(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync(okResponse)
                 .ThrowsAsync(new System.Net.Http.HttpRequestException("failed"))
                 .ThrowsAsync(new System.Net.Http.HttpRequestException("failed"))

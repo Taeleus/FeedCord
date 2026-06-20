@@ -4,7 +4,14 @@ namespace FeedCord.Services.Interfaces
 {
     public interface ICustomHttpClient
     {
-        Task<HttpResponseMessage?> GetAsyncWithFallback(string url);
-        Task PostAsyncWithFallback(string url, StringContent forumChannelContent, StringContent textChannelContent, bool isForum);
+        Task<HttpResponseMessage?> GetAsyncWithFallback(
+            string url,
+            CancellationToken cancellationToken = default);
+        Task<bool> PostAsyncWithFallback(
+            string url,
+            StringContent forumChannelContent,
+            StringContent textChannelContent,
+            bool isForum,
+            CancellationToken cancellationToken = default);
     }
 }

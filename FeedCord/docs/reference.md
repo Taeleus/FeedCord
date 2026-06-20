@@ -86,7 +86,7 @@ Some properties are required while others are optional. A bare-bones `appsetting
 				""
 			],
 			"RssUrls": [
-				"https://github.com/qolors/FeedCord/releases.atom"
+				"https://github.com/Taeleus/FeedCord/releases.atom"
 			],
 			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
 			"RssCheckIntervalMinutes": 15,
@@ -143,7 +143,7 @@ Post filters are useful if you are looking to sift out specific content from an 
 				""
 			],
 			"RssUrls": [
-				"https://github.com/qolors/FeedCord/releases.atom"
+				"https://github.com/Taeleus/FeedCord/releases.atom"
 			],
 			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
 			"RssCheckIntervalMinutes": 15,
@@ -155,7 +155,7 @@ Post filters are useful if you are looking to sift out specific content from an 
 			"ConcurrentRequests": 10,
 			"PostFilters": [
 			{
-				"Url": "https://github.com/qolors/FeedCord/releases.atom",
+				"Url": "https://github.com/Taeleus/FeedCord/releases.atom",
 				"Filters": ["release", "new feature"]
 			}
 		]
@@ -181,7 +181,7 @@ Here is an example of two urls with each their own filter:
 				""
 			],
 			"RssUrls": [
-				"https://github.com/qolors/FeedCord/releases.atom",
+				"https://github.com/Taeleus/FeedCord/releases.atom",
 				"https://github.com/qolors/Clam-Shell/releases.atom"
 			],
 			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
@@ -194,7 +194,7 @@ Here is an example of two urls with each their own filter:
 			"ConcurrentRequests": 10,
 			"PostFilters": [
 			{
-				"Url": "https://github.com/qolors/FeedCord/releases.atom",
+				"Url": "https://github.com/Taeleus/FeedCord/releases.atom",
 				"Filters": ["release", "new feature"]
 			},
 			{
@@ -220,7 +220,7 @@ Luckily you can simply do this to do a filter for all feeds - set `Url` equal to
 				""
 			],
 			"RssUrls": [
-				"https://github.com/qolors/FeedCord/releases.atom",
+				"https://github.com/Taeleus/FeedCord/releases.atom",
 				"https://github.com/qolors/Clam-Shell/releases.atom"
 			],
 			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
@@ -259,7 +259,7 @@ Luckily you can simply do this to do a filter for all feeds - set `Url` equal to
 - **DescriptionLimit**: Limits the length of the description of the post to this number.
 - **Forum**: Determines if the post will be sent to a Forum type channel.
 - **MarkdownFormat**: If set true, will post feed item in markdown instead of an Embed.
-- **PersistenceOnShutdown**: If set true, will store the last run date when restart or shutdown to catch missed posts.
+- **PersistenceOnShutdown**: If set true, stores delivery checkpoints after successful posts and during graceful shutdown. Checkpoints use UTC publication times plus feed item IDs, so separate items sharing a timestamp are not skipped. Mount `/app/state` when using Docker so checkpoints survive container replacement.
 
 ### Optional
 
@@ -276,4 +276,3 @@ Luckily you can simply do this to do a filter for all feeds - set `Url` equal to
 - **PostFilters**: A collection of phrases/words that are used to filter out RSS Items (filters the Title & Content)
 
 ---
-

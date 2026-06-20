@@ -9,13 +9,12 @@ using FeedCord.Services.Factories;
 using FeedCord.Infrastructure.Factories;
 using FeedCord.Services.Interfaces;
 using FeedCord.Infrastructure.Parsers;
+using FeedCord.Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
-using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
 
 namespace FeedCord
 {
@@ -62,13 +61,10 @@ namespace FeedCord
             services.AddHttpClient("Default", httpClient =>
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " + 
-                    "(KHTML, like Gecko) Chrome/104.0.5112.79 Safari/537.36"
-                );
-            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler(){AllowAutoRedirect = true});
+            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler() { AllowAutoRedirect = true });
 
-            var concurrentRequests = ctx.Configuration.GetValue("ConcurrentRequests", 20);
+            var concurrentRequests = ConfigValidator.ValidateGlobalConcurrency(
+                ctx.Configuration.GetValue("ConcurrentRequests", 20));
 
             if (concurrentRequests != 20)
             {
@@ -76,7 +72,8 @@ namespace FeedCord
             }
 
             services.AddSingleton(new SemaphoreSlim(concurrentRequests));
-            
+            services.AddSingleton<IFeedStateStore, JsonFeedStateStore>();
+
             services.AddSingleton<IBatchLogger, BatchLogger>(sp =>
             {
                 var logger = sp.GetRequiredService<ILogger<BatchLogger>>();
@@ -105,14 +102,14 @@ namespace FeedCord
 
             var configs = ctx.Configuration.GetSection("Instances")
                 .Get<List<Config>>() ?? new List<Config>();
-            
+
             Console.WriteLine($"Number of configurations loaded: {configs.Count}");
 
             foreach (var c in configs)
             {
                 Console.WriteLine($"Validating & Registering Background Service {c.Id}");
 
-                ValidateConfiguration(c);
+                ConfigValidator.Validate(c);
 
                 services.AddSingleton<IHostedService>(sp =>
                 {
@@ -132,18 +129,5 @@ namespace FeedCord
             }
         }
 
-        private static void ValidateConfiguration(Config config)
-        {
-            var context = new ValidationContext(config, serviceProvider: null, items: null);
-            var results = new List<ValidationResult>();
-
-            if (Validator.TryValidateObject(config, context, results, validateAllProperties: true)) 
-                return;
-            
-            var errors = string.Join("\n", results.Select(r => r.ErrorMessage));
-            throw new InvalidOperationException($"Invalid config entry: {errors}");
-        }
     }
 }
-
-

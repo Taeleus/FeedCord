@@ -1,5 +1,4 @@
 ﻿using FeedCord.Common;
-using FeedCord.Helpers;
 using FeedCord.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -7,6 +6,8 @@ using System.IO.Compression;
 using System.Text;
 using FeedCord.Core.Interfaces;
 using FeedCord.Services.Helpers;
+using FeedCord.Infrastructure.Persistence;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FeedCord.Services
 {
@@ -19,8 +20,31 @@ namespace FeedCord.Services
         private readonly ILogger<FeedManager> _logger;
         private readonly IRssParsingService _rssParsingService;
         private readonly IPostFilterService _postFilterService;
-        private readonly Dictionary<string, ReferencePost> _lastRunReference;
+        private readonly IFeedStateStore _stateStore;
+        private IReadOnlyDictionary<string, ReferencePost> _lastRunReference;
         private readonly ConcurrentDictionary<string, FeedState> _feedStates;
+
+        [ActivatorUtilitiesConstructor]
+        public FeedManager(
+            Config config,
+            ICustomHttpClient httpClient,
+            IRssParsingService rssParsingService,
+            IPostFilterService postFilterService,
+            IFeedStateStore stateStore,
+            ILogger<FeedManager> logger,
+            ILogAggregator logAggregator)
+        {
+            _config = config;
+            _httpClient = httpClient;
+            _stateStore = stateStore;
+            _lastRunReference = new Dictionary<string, ReferencePost>();
+            _rssParsingService = rssParsingService;
+            _postFilterService = postFilterService;
+            _logger = logger;
+            _logAggregator = logAggregator;
+            _feedStates = new ConcurrentDictionary<string, FeedState>();
+            _instancedConcurrentRequests = new SemaphoreSlim(config.ConcurrentRequests);
+        }
 
         public FeedManager(
             Config config,
@@ -29,32 +53,79 @@ namespace FeedCord.Services
             IPostFilterService postFilterService,
             ILogger<FeedManager> logger,
             ILogAggregator logAggregator)
+            : this(
+                config,
+                httpClient,
+                rssParsingService,
+                postFilterService,
+                NullFeedStateStore.Instance,
+                logger,
+                logAggregator)
         {
-            _config = config;
-            _httpClient = httpClient;
-            _lastRunReference = CsvReader.LoadReferencePosts("feed_dump.csv");
-            _rssParsingService = rssParsingService;
-            _postFilterService = postFilterService;
-            _logger = logger;
-            _logAggregator = logAggregator;
-            _feedStates = new ConcurrentDictionary<string, FeedState>();
-            _instancedConcurrentRequests = new SemaphoreSlim(config.ConcurrentRequests);
         }
-        public async Task<List<Post>> CheckForNewPostsAsync()
+        public async Task<List<PendingPost>> CheckForNewPostsAsync(
+            CancellationToken cancellationToken = default)
         {
-            ConcurrentBag<Post> allNewPosts = new();
+            ConcurrentBag<PendingPost> allNewPosts = new();
 
             var tasks = _feedStates.Select(async (feed) =>
-                await CheckSingleFeedAsync(feed.Key, feed.Value, allNewPosts, _config.DescriptionLimit));
+                await CheckSingleFeedAsync(
+                    feed.Key,
+                    feed.Value,
+                    allNewPosts,
+                    _config.DescriptionLimit,
+                    cancellationToken));
 
             await Task.WhenAll(tasks);
 
-            _logAggregator.SetNewPostCount(allNewPosts.Count);
+            _logAggregator.SetNewPostCount(allNewPosts.Count(post => post.ShouldNotify));
 
             return allNewPosts.ToList();
         }
-        public async Task InitializeUrlsAsync()
+
+        public async Task AcknowledgePostsAsync(
+            IReadOnlyCollection<PendingPost> pendingPosts,
+            CancellationToken cancellationToken = default)
         {
+            if (pendingPosts.Count == 0)
+                return;
+
+            var feedUrl = pendingPosts.First().FeedUrl;
+            if (!_feedStates.TryGetValue(feedUrl, out var feedState))
+                return;
+
+            var latestDate = pendingPosts.Max(item => item.Post.PublishDate).ToUniversalTime();
+            if (latestDate > feedState.LastPublishDate)
+            {
+                feedState.LastPublishDate = latestDate;
+                feedState.ItemIdsAtLastPublishDate = pendingPosts
+                    .Where(item => item.Post.PublishDate.ToUniversalTime() == latestDate)
+                    .Select(item => PostIdentity.GetStableId(item.Post))
+                    .ToHashSet(StringComparer.Ordinal);
+            }
+            else if (latestDate == feedState.LastPublishDate)
+            {
+                foreach (var pendingPost in pendingPosts.Where(
+                             item => item.Post.PublishDate.ToUniversalTime() == latestDate))
+                {
+                    feedState.ItemIdsAtLastPublishDate.Add(PostIdentity.GetStableId(pendingPost.Post));
+                }
+            }
+
+            feedState.ErrorCount = 0;
+
+            if (_config.PersistenceOnShutdown)
+                await SaveStateAsync(cancellationToken);
+        }
+
+        public Task SaveStateAsync(CancellationToken cancellationToken = default)
+        {
+            return _stateStore.SaveAsync(_config.Id, _feedStates, cancellationToken);
+        }
+        public async Task InitializeUrlsAsync(CancellationToken cancellationToken = default)
+        {
+            _lastRunReference = await _stateStore.LoadAsync(_config.Id, cancellationToken);
+
             var id = _config.Id;
             var validRssUrls = _config.RssUrls
                 .Where(url => !string.IsNullOrWhiteSpace(url))
@@ -64,8 +135,8 @@ namespace FeedCord.Services
                 .Where(url => !string.IsNullOrWhiteSpace(url))
                 .ToArray();
 
-            var rssCount = await GetSuccessCount(validRssUrls, false);
-            var youtubeCount = await GetSuccessCount(validYoutubeUrls, true);
+            var rssCount = await GetSuccessCount(validRssUrls, false, cancellationToken);
+            var youtubeCount = await GetSuccessCount(validYoutubeUrls, true, cancellationToken);
             var successCount = rssCount + youtubeCount;
 
             var totalUrls = validRssUrls.Length + validYoutubeUrls.Length;
@@ -77,7 +148,10 @@ namespace FeedCord.Services
         {
             return _feedStates;
         }
-        private async Task<int> GetSuccessCount(string[] urls, bool isYoutube)
+        private async Task<int> GetSuccessCount(
+            string[] urls,
+            bool isYoutube,
+            CancellationToken cancellationToken)
         {
             var successCount = 0;
 
@@ -88,7 +162,7 @@ namespace FeedCord.Services
 
             foreach (var url in urls)
             {
-                var isSuccess = await TestUrlAsync(url);
+                var isSuccess = await TestUrlAsync(url, cancellationToken);
 
                 if (!isSuccess)
                 {
@@ -100,7 +174,10 @@ namespace FeedCord.Services
                     _feedStates.TryAdd(url, new FeedState
                     {
                         IsYoutube = isYoutube,
-                        LastPublishDate = value.LastRunDate,
+                        LastPublishDate = value.LastRunDate.ToUniversalTime(),
+                        ItemIdsAtLastPublishDate = new HashSet<string>(
+                            value.ItemIdsAtLastRunDate,
+                            StringComparer.Ordinal),
                         ErrorCount = 0
                     });
 
@@ -116,7 +193,7 @@ namespace FeedCord.Services
                     successfulAdd = _feedStates.TryAdd(url, new FeedState
                     {
                         IsYoutube = true,
-                        LastPublishDate = DateTime.Now,
+                        LastPublishDate = DateTimeOffset.UtcNow,
                         ErrorCount = 0
                     });
                 }
@@ -125,7 +202,7 @@ namespace FeedCord.Services
                     successfulAdd = _feedStates.TryAdd(url, new FeedState
                     {
                         IsYoutube = false,
-                        LastPublishDate = DateTime.Now,
+                        LastPublishDate = DateTimeOffset.UtcNow,
                         ErrorCount = 0
                     });
                 }
@@ -143,13 +220,15 @@ namespace FeedCord.Services
 
             return successCount;
         }
-        private async Task<bool> TestUrlAsync(string url)
+        private async Task<bool> TestUrlAsync(string url, CancellationToken cancellationToken)
         {
+            var acquired = false;
             try
             {
-                await _instancedConcurrentRequests.WaitAsync();
+                await _instancedConcurrentRequests.WaitAsync(cancellationToken);
+                acquired = true;
 
-                var response = await _httpClient.GetAsyncWithFallback(url);
+                using var response = await _httpClient.GetAsyncWithFallback(url, cancellationToken);
 
                 if (response is null)
                 {
@@ -167,28 +246,44 @@ namespace FeedCord.Services
             {
                 _logAggregator.AddUrlResponse(url, (int)(ex.StatusCode ?? System.Net.HttpStatusCode.BadRequest));
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception)
             {
                 _logger.LogWarning("Failed to instantiate URL: {Url}", url);
             }
             finally
             {
-                _instancedConcurrentRequests.Release();
+                if (acquired)
+                    _instancedConcurrentRequests.Release();
             }
 
             return false;
         }
-        private async Task CheckSingleFeedAsync(string url, FeedState feedState, ConcurrentBag<Post> newPosts, int trim)
+        private async Task CheckSingleFeedAsync(
+            string url,
+            FeedState feedState,
+            ConcurrentBag<PendingPost> newPosts,
+            int trim,
+            CancellationToken cancellationToken)
         {
             List<Post?> posts;
+            var acquired = false;
 
             try
             {
-                await _instancedConcurrentRequests.WaitAsync();
+                await _instancedConcurrentRequests.WaitAsync(cancellationToken);
+                acquired = true;
 
                 posts = feedState.IsYoutube ?
-                    await FetchYoutubeAsync(url) :
-                    await FetchRssAsync(url, trim);
+                    await FetchYoutubeAsync(url, cancellationToken) :
+                    await FetchRssAsync(url, trim, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -197,16 +292,19 @@ namespace FeedCord.Services
             }
             finally
             {
-                _instancedConcurrentRequests.Release();
+                if (acquired)
+                    _instancedConcurrentRequests.Release();
             }
 
-            var freshlyFetched = posts.Where(p => p?.PublishDate > feedState.LastPublishDate).ToList();
+            feedState.ErrorCount = 0;
+
+            var freshlyFetched = posts
+                .Where(p => p is not null && IsUnseen(p, feedState))
+                .OrderBy(p => p!.PublishDate)
+                .ToList();
 
             if (freshlyFetched.Any())
             {
-                feedState.LastPublishDate = freshlyFetched.Max(p => p!.PublishDate);
-                feedState.ErrorCount = 0;
-
                 foreach (var post in freshlyFetched)
                 {
                     if (post is null)
@@ -215,11 +313,10 @@ namespace FeedCord.Services
                         continue;
                     }
 
-                    if (_postFilterService.ShouldInclude(post, url))
-                    {
-                        newPosts.Add(post);
-                    }
-                    else
+                    var shouldNotify = _postFilterService.ShouldInclude(post, url);
+                    newPosts.Add(new PendingPost(url, post, shouldNotify));
+
+                    if (!shouldNotify)
                     {
                         _logger.LogInformation(
                             "A new post was omitted because it does not comply with configured filters: {Url}", url);
@@ -232,18 +329,20 @@ namespace FeedCord.Services
             }
 
         }
-        private async Task<List<Post?>> FetchYoutubeAsync(string url)
+        private async Task<List<Post?>> FetchYoutubeAsync(
+            string url,
+            CancellationToken cancellationToken)
         {
             Post? post;
 
             // Treat YouTube URLs with embedded xml directly as a feed source.
-            if (url.Contains("xml", StringComparison.OrdinalIgnoreCase))
+            if (IsYoutubeFeedUrl(url))
             {
-                post = await _rssParsingService.ParseYoutubeFeedAsync(url);
+                post = await _rssParsingService.ParseYoutubeFeedAsync(url, cancellationToken);
                 return post == null ? new List<Post?>() : new List<Post?> { post };
             }
 
-            using var response = await _httpClient.GetAsyncWithFallback(url);
+            using var response = await _httpClient.GetAsyncWithFallback(url, cancellationToken);
 
             if (response is null)
             {
@@ -256,15 +355,18 @@ namespace FeedCord.Services
                 throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
             }
 
-            var xmlContent = await GetResponseContentAsync(response);
-            post = await _rssParsingService.ParseYoutubeFeedAsync(xmlContent);
+            var xmlContent = await GetResponseContentAsync(response, cancellationToken);
+            post = await _rssParsingService.ParseYoutubeFeedAsync(xmlContent, cancellationToken);
 
             return post == null ? new List<Post?>() : new List<Post?> { post };
         }
 
-        private async Task<List<Post?>> FetchRssAsync(string url, int trim)
+        private async Task<List<Post?>> FetchRssAsync(
+            string url,
+            int trim,
+            CancellationToken cancellationToken)
         {
-            using var response = await _httpClient.GetAsyncWithFallback(url);
+            using var response = await _httpClient.GetAsyncWithFallback(url, cancellationToken);
 
             if (response is null)
             {
@@ -277,23 +379,27 @@ namespace FeedCord.Services
                 throw new HttpRequestException($"HTTP {response.StatusCode}", null, response.StatusCode);
             }
 
-            var xmlContent = await GetResponseContentAsync(response);
-            return await _rssParsingService.ParseRssFeedAsync(xmlContent, trim);
+            var xmlContent = await GetResponseContentAsync(response, cancellationToken);
+            return await _rssParsingService.ParseRssFeedAsync(xmlContent, trim, cancellationToken);
         }
 
-        private async Task<string> GetResponseContentAsync(HttpResponseMessage response)
+        private async Task<string> GetResponseContentAsync(
+            HttpResponseMessage response,
+            CancellationToken cancellationToken)
         {
             try
             {
                 if (response.Content.Headers.ContentEncoding.Contains("gzip"))
                 {
-                    await using var decompressedStream = new GZipStream(await response.Content.ReadAsStreamAsync(), CompressionMode.Decompress);
+                    await using var decompressedStream = new GZipStream(
+                        await response.Content.ReadAsStreamAsync(cancellationToken),
+                        CompressionMode.Decompress);
                     using var reader = new StreamReader(decompressedStream, Encoding.UTF8);
-                    return await reader.ReadToEndAsync();
+                    return await reader.ReadToEndAsync(cancellationToken);
                 }
                 else
                 {
-                    var bytes = await response.Content.ReadAsByteArrayAsync();
+                    var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
                     return EncodingExtractor.ConvertBytesByComparing(bytes, response.Content.Headers);
                 }
             }
@@ -301,6 +407,10 @@ namespace FeedCord.Services
             {
                 _logger.LogWarning(ex, "Failed to decode response content from {Url}", response.RequestMessage?.RequestUri);
                 return string.Empty;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -325,6 +435,22 @@ namespace FeedCord.Services
             }
         }
 
+        private static bool IsYoutubeFeedUrl(string url)
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+                   (uri.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+                    uri.AbsolutePath.Equals("/feeds/videos.xml", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsUnseen(Post post, FeedState feedState)
+        {
+            var publishDate = post.PublishDate.ToUniversalTime();
+            if (publishDate > feedState.LastPublishDate)
+                return true;
+
+            return publishDate == feedState.LastPublishDate &&
+                   !feedState.ItemIdsAtLastPublishDate.Contains(PostIdentity.GetStableId(post));
+        }
 
     }
 }

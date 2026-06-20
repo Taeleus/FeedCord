@@ -18,12 +18,12 @@ public static partial class EncodingExtractor
         }
 
         var xmlDeclaredEncoding = TryGuessXmlEncoding(bytes);
-        
+
         // Currently always trusting RSS Prolog declaration
         var finalDeclaredEncoding = !string.IsNullOrEmpty(xmlDeclaredEncoding) ?
-            xmlDeclaredEncoding : 
+            xmlDeclaredEncoding :
             serverDeclaredEncoding;
-        
+
         try
         {
             var finalEncoding = Encoding.GetEncoding(finalDeclaredEncoding);
@@ -40,11 +40,11 @@ public static partial class EncodingExtractor
         var length = Math.Min(bytes.Length, MAX_BYTES);
 
         var prologContent = Encoding.ASCII.GetString(bytes, 0, length);
-        
+
         var match = EncodingRegex().Match(prologContent);
-        
-        return match is { Success: true, Groups.Count: > 1 } ? 
-            match.Groups[1].Value.Trim() : 
+
+        return match is { Success: true, Groups.Count: > 1 } ?
+            match.Groups[1].Value.Trim() :
             null;
     }
 

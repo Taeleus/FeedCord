@@ -16,16 +16,19 @@ namespace FeedCord.Infrastructure.Parsers
             _logger = logger;
         }
 
-        public async Task<string?> TryExtractImageLink(string pageUrl, string xmlSource)
+        public async Task<string?> TryExtractImageLink(
+            string pageUrl,
+            string xmlSource,
+            CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(xmlSource)) 
-                return await ScrapeImageFromWebpage(pageUrl);
-            
+            if (string.IsNullOrWhiteSpace(xmlSource))
+                return await ScrapeImageFromWebpage(pageUrl, cancellationToken);
+
             var feedImageUrl = ExtractImageFromFeedXml(xmlSource);
-            
-            if (!IsValidImageUrl(feedImageUrl)) 
-                return await ScrapeImageFromWebpage(pageUrl);
-            
+
+            if (!IsValidImageUrl(feedImageUrl))
+                return await ScrapeImageFromWebpage(pageUrl, cancellationToken);
+
             feedImageUrl = MakeAbsoluteUrl(pageUrl, feedImageUrl);
             return feedImageUrl;
         }
@@ -35,7 +38,7 @@ namespace FeedCord.Infrastructure.Parsers
             try
             {
                 var xdoc = XDocument.Parse(xmlSource);
-                
+
                 var enclosureImage = xdoc.Descendants("enclosure")
                     .FirstOrDefault(e => e.Attribute("type") != null &&
                                          e.Attribute("type")!.Value.StartsWith("image/", StringComparison.OrdinalIgnoreCase));
@@ -44,7 +47,7 @@ namespace FeedCord.Infrastructure.Parsers
                     var url = enclosureImage.Attribute("url")?.Value;
                     if (!string.IsNullOrWhiteSpace(url)) return url;
                 }
-                
+
                 var mediaContent = xdoc.Descendants()
                     .FirstOrDefault(el =>
                         (el.Name.LocalName == "content" || el.Name.LocalName == "thumbnail") &&
@@ -56,7 +59,7 @@ namespace FeedCord.Infrastructure.Parsers
                     var url = mediaContent.Attribute("url")?.Value;
                     if (!string.IsNullOrWhiteSpace(url)) return url;
                 }
-                
+
                 var itunesImage = xdoc.Descendants().FirstOrDefault(el => el.Name.LocalName == "image" &&
                                                                           el.Name.NamespaceName.Contains("itunes") &&
                                                                           el.Attribute("href") != null);
@@ -65,10 +68,10 @@ namespace FeedCord.Infrastructure.Parsers
                     var url = itunesImage.Attribute("href")?.Value;
                     if (!string.IsNullOrWhiteSpace(url)) return url;
                 }
-                
+
                 var descNode = xdoc.Descendants("description").FirstOrDefault();
                 var contentNode = xdoc.Descendants().FirstOrDefault(n => n.Name.LocalName == "encoded");
-                
+
                 var descHtml = descNode?.Value ?? string.Empty;
                 var contentHtml = contentNode?.Value ?? string.Empty;
 
@@ -91,17 +94,19 @@ namespace FeedCord.Infrastructure.Parsers
 
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
-            
+
             var imgNode = doc.DocumentNode.SelectSingleNode("//img[@src]");
-            if (imgNode == null) 
+            if (imgNode == null)
                 return string.Empty;
-            
+
             var src = imgNode.GetAttributeValue("src", null);
-            
+
             return !string.IsNullOrWhiteSpace(src) ? src : string.Empty;
         }
 
-        private async Task<string?> ScrapeImageFromWebpage(string pageUrl)
+        private async Task<string?> ScrapeImageFromWebpage(
+            string pageUrl,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(pageUrl))
                 return string.Empty;
@@ -109,12 +114,12 @@ namespace FeedCord.Infrastructure.Parsers
             try
             {
                 // Download HTML
-                var response = await _httpClient.GetAsyncWithFallback(pageUrl);
+                using var response = await _httpClient.GetAsyncWithFallback(pageUrl, cancellationToken);
 
                 if (response is null) return string.Empty;
-                
+
                 response.EnsureSuccessStatusCode();
-                var htmlContent = await response.Content.ReadAsStringAsync();
+                var htmlContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
                 // Existing logic
                 var doc = new HtmlDocument();
@@ -126,6 +131,10 @@ namespace FeedCord.Infrastructure.Parsers
                     imageUrl = MakeAbsoluteUrl(pageUrl, imageUrl);
                     return imageUrl;
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -177,9 +186,9 @@ namespace FeedCord.Infrastructure.Parsers
                 url.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase))
                 return false;
 
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUri)) 
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUri))
                 return true;
-            
+
             return !parsedUri.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase);
         }
 

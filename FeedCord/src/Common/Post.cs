@@ -6,8 +6,9 @@
         string Description,
         string Link,
         string Tag,
-        DateTime PublishDate,
+        DateTimeOffset PublishDate,
         string Author,
-        string[]? Labels = null
+        string[]? Labels = null,
+        string? ItemId = null
         );
 }

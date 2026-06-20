@@ -18,7 +18,7 @@ namespace FeedCord.Infrastructure.Workers
         private readonly string _id;
         private readonly int _delayTime;
         private bool _isInitialized;
-        
+
 
         public FeedWorker(
             IHostApplicationLifetime lifetime,
@@ -49,18 +49,22 @@ namespace FeedCord.Infrastructure.Workers
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                _logAggregator.SetStartTime(DateTime.Now);
+                _logAggregator.SetStartTime(DateTimeOffset.UtcNow);
 
                 try
                 {
-                    await RunRoutineBackgroundProcessAsync();
+                    await RunRoutineBackgroundProcessAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Error in Background Process loop. Continuing to next interval.");
                 }
 
-                _logAggregator.SetEndTime(DateTime.Now);
+                _logAggregator.SetEndTime(DateTimeOffset.UtcNow);
 
                 try
                 {
@@ -83,40 +87,60 @@ namespace FeedCord.Infrastructure.Workers
             }
         }
 
-        private async Task RunRoutineBackgroundProcessAsync()
+        private async Task RunRoutineBackgroundProcessAsync(CancellationToken cancellationToken)
         {
             if (!_isInitialized)
             {
                 _logger.LogInformation("{id}: Initializing Url Checks..", _id);
-                await _feedManager.InitializeUrlsAsync();
+                await _feedManager.InitializeUrlsAsync(cancellationToken);
                 _isInitialized = true;
             }
 
-            var posts = await _feedManager.CheckForNewPostsAsync();
+            var posts = await _feedManager.CheckForNewPostsAsync(cancellationToken);
 
             if (posts.Count > 0)
             {
-                _logger.LogInformation("{id}: Found {PostCount} new posts..", _id, posts.Count);
-                await _notifier.SendNotificationsAsync(posts);
+                var notificationCount = posts.Count(post => post.ShouldNotify);
+                _logger.LogInformation("{id}: Found {PostCount} new posts", _id, notificationCount);
+
+                foreach (var feedGroup in posts.GroupBy(post => post.FeedUrl))
+                {
+                    var orderedPosts = feedGroup.OrderBy(post => post.Post.PublishDate).ToList();
+                    var deliverySucceeded = true;
+
+                    foreach (var pendingPost in orderedPosts)
+                    {
+                        if (pendingPost.ShouldNotify &&
+                            !await _notifier.SendNotificationAsync(pendingPost.Post, cancellationToken))
+                        {
+                            _logger.LogWarning(
+                                "{id}: Delivery failed for {PostUrl}; later posts from this feed will be retried",
+                                _id,
+                                pendingPost.Post.Link);
+                            deliverySucceeded = false;
+                            break;
+                        }
+                    }
+
+                    // Checkpoint the feed only after its complete batch succeeds. This avoids
+                    // losing posts that share a publication timestamp or follow a failed post.
+                    if (deliverySucceeded)
+                        await _feedManager.AcknowledgePostsAsync(orderedPosts, cancellationToken);
+                }
             }
         }
 
         private void OnShutdown()
         {
             if (!_persistent) return;
-            
-            var data = _feedManager.GetAllFeedData();
-            SaveDataToCsv(data);
-        }
 
-        private void SaveDataToCsv(IReadOnlyDictionary<string, FeedState> data)
-        {
-            var filePath = Path.Combine(AppContext.BaseDirectory, "feed_dump.csv");
-            using var writer = new StreamWriter(filePath, append: true);
-
-            foreach (var (key, value) in data)
+            try
             {
-                writer.WriteLine($"{key},{value.IsYoutube},{DateTime.Now}");
+                _feedManager.SaveStateAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "{id}: Failed to persist feed state during shutdown", _id);
             }
         }
     }

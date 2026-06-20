@@ -36,7 +36,11 @@ namespace FeedCord.Helpers
                         continue;
                     }
 
-                    if (!DateTime.TryParse(parts[2], CultureInfo.InvariantCulture, DateTimeStyles.None, out var lastRunDate))
+                    if (!DateTimeOffset.TryParse(
+                            parts[2],
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.AssumeUniversal,
+                            out var lastRunDate))
                     {
                         continue;
                     }
@@ -44,7 +48,7 @@ namespace FeedCord.Helpers
                     dictionary[url] = new ReferencePost
                     {
                         IsYoutube = isYoutube,
-                        LastRunDate = lastRunDate
+                        LastRunDate = lastRunDate.ToUniversalTime()
                     };
                 }
             }

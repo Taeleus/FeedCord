@@ -17,6 +17,7 @@ namespace FeedCord.Common
         public required string DiscordWebhookUrl { get; set; }
 
         [Required(ErrorMessage = "RssCheckIntervalMinutes Property is required.")]
+        [Range(1, 1440, ErrorMessage = "RssCheckIntervalMinutes must be between 1 and 1440.")]
         public int RssCheckIntervalMinutes { get; set; }
         public string? Username { get; set; }
         public string? AvatarUrl { get; set; }
@@ -29,6 +30,7 @@ namespace FeedCord.Common
         public bool EnableAutoRemove { get; set; }
 
         [Required(ErrorMessage = "Description Limit Property is required.")]
+        [Range(0, 4096, ErrorMessage = "DescriptionLimit must be between 0 and 4096.")]
         public int DescriptionLimit { get; set; }
         [Required(ErrorMessage = "Forum Property is required (True for Forum Channels, False for Text Channels)")]
         public bool Forum { get; set; }
@@ -38,6 +40,7 @@ namespace FeedCord.Common
         public bool PersistenceOnShutdown { get; set; }
         public List<PostFilters>? PostFilters { get; set; }
         public Dictionary<string, string[]>? Pings { get; set; }
+        [Range(1, 100, ErrorMessage = "ConcurrentRequests must be between 1 and 100.")]
         public int ConcurrentRequests { get; set; } = 5;
     }
 }

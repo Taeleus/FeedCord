@@ -1,212 +1,219 @@
-﻿using System.Net;
-using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
+using System.Net;
+using System.Text.Json;
 using FeedCord.Services.Interfaces;
-using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
-namespace FeedCord.Infrastructure.Http
+namespace FeedCord.Infrastructure.Http;
+
+public sealed class CustomHttpClient : ICustomHttpClient
 {
-    public class CustomHttpClient : ICustomHttpClient
+    private const string FeedCordUserAgent = "FeedCord/3.1 (+https://github.com/Taeleus/FeedCord)";
+    private readonly HttpClient _innerClient;
+    private readonly ILogger<CustomHttpClient> _logger;
+    private readonly SemaphoreSlim _throttle;
+
+    public CustomHttpClient(
+        ILogger<CustomHttpClient> logger,
+        HttpClient innerClient,
+        SemaphoreSlim throttle)
     {
-        private const string USER_MIMICK = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-                                          "(KHTML, like Gecko) Chrome/104.0.5112.79 Safari/537.36";
-        private const string GOOGLE_FEED_FETCHER = "FeedFetcher-Google";
+        _logger = logger;
+        _throttle = throttle;
+        _innerClient = innerClient;
+    }
 
-        private readonly HttpClient _innerClient;
-        private readonly ILogger<CustomHttpClient> _logger;
-        private readonly SemaphoreSlim _throttle;
-        private readonly ConcurrentDictionary<string, string> _userAgentCache;
-
-        public CustomHttpClient(ILogger<CustomHttpClient> logger, HttpClient innerClient, SemaphoreSlim throttle)
+    public async Task<HttpResponseMessage?> GetAsyncWithFallback(
+        string url,
+        CancellationToken cancellationToken = default)
+    {
+        try
         {
-            _logger = logger;
-            _throttle = throttle;
-            _innerClient = innerClient;
-            _userAgentCache = new ConcurrentDictionary<string, string>();
+            return await SendGetAsync(url, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(
+                "Request timed out for {Url}: {ErrorType}",
+                SafeUrl(url),
+                ex.GetType().Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "GET request failed for {Url}: {ErrorType}",
+                SafeUrl(url),
+                ex.GetType().Name);
         }
 
-        public async Task<HttpResponseMessage?> GetAsyncWithFallback(string url)
+        return null;
+    }
+
+    public async Task<bool> PostAsyncWithFallback(
+        string url,
+        StringContent forumChannelContent,
+        StringContent textChannelContent,
+        bool isForum,
+        CancellationToken cancellationToken = default)
+    {
+        try
         {
-            HttpResponseMessage? response = null;
+            using var response = await SendPostWithRateLimitAsync(
+                url,
+                isForum ? forumChannelContent : textChannelContent,
+                cancellationToken);
 
-            try
+            if (response.IsSuccessStatusCode)
+                return true;
+
+            var responseError = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "Discord returned HTTP {StatusCode}: {ResponseError}",
+                response.StatusCode,
+                responseError);
+
+            if (response.StatusCode != HttpStatusCode.BadRequest)
+                return false;
+
+            using var fallbackResponse = await SendPostWithRateLimitAsync(
+                url,
+                isForum ? textChannelContent : forumChannelContent,
+                cancellationToken);
+
+            if (fallbackResponse.IsSuccessStatusCode)
             {
-                response = await SendGetAsync(url, _userAgentCache.GetValueOrDefault(url));
+                _logger.LogWarning(
+                    "Discord accepted the alternate channel payload; correct the Forum setting");
+                return true;
+            }
 
-                if (response.IsSuccessStatusCode)
-                    return response;
+            _logger.LogError(
+                "Discord fallback returned HTTP {StatusCode}: {ResponseError}",
+                fallbackResponse.StatusCode,
+                await fallbackResponse.Content.ReadAsStringAsync(cancellationToken));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "Failed to post to Discord webhook {Webhook}: {ErrorType}",
+                SafeUrl(url),
+                ex.GetType().Name);
+        }
 
-                response = await TryAlternativeAsync(url, response);
+        return false;
+    }
 
+    private async Task<HttpResponseMessage> SendGetAsync(
+        string url,
+        CancellationToken cancellationToken)
+    {
+        await _throttle.WaitAsync(cancellationToken);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd(FeedCordUserAgent);
+            request.Headers.Accept.ParseAdd(
+                "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5");
+            return await _innerClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+        }
+        finally
+        {
+            _throttle.Release();
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendPostAsync(
+        string url,
+        StringContent content,
+        CancellationToken cancellationToken)
+    {
+        await _throttle.WaitAsync(cancellationToken);
+        try
+        {
+            return await _innerClient.PostAsync(url, content, cancellationToken);
+        }
+        finally
+        {
+            _throttle.Release();
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendPostWithRateLimitAsync(
+        string url,
+        StringContent content,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var response = await SendPostAsync(url, content, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.TooManyRequests || attempt == maxAttempts)
                 return response;
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogWarning("Request to {Url} was canceled: {Ex}", url, ex);
-            }
-            catch (OperationCanceledException ex)
-            {
-                _logger.LogWarning("Operation was canceled for {Url}: {Ex}", url, ex);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("An error occurred while processing the request for {Url}: {Ex}", url, ex);
-            }
 
-            return response;
+            var delay = await GetRetryDelayAsync(response, cancellationToken);
+            response.Dispose();
+
+            _logger.LogWarning(
+                "Discord rate limited the webhook; retrying in {DelayMs} ms (attempt {Attempt}/{MaxAttempts})",
+                delay.TotalMilliseconds,
+                attempt + 1,
+                maxAttempts);
+
+            await Task.Delay(delay, cancellationToken);
         }
 
-        public async Task PostAsyncWithFallback(string url, StringContent forumChannelContent, StringContent textChannelContent, bool isForum)
+        throw new InvalidOperationException("Discord retry loop exited unexpectedly.");
+    }
+
+    private static async Task<TimeSpan> GetRetryDelayAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        if (response.Headers.RetryAfter?.Delta is { } headerDelay)
+            return ClampRetryDelay(headerDelay);
+
+        try
         {
-            HttpResponseMessage response;
-
-            try
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty("retry_after", out var retryAfter) &&
+                retryAfter.TryGetDouble(out var seconds))
             {
-                response = await SendPostAsync(url, isForum ? forumChannelContent : textChannelContent);
-
-                if (response.StatusCode == HttpStatusCode.NoContent)
-                    return;
-
-                _logger.LogError("Response Error: {ResponseError}", await response.Content.ReadAsStringAsync());
-
-                response = await SendPostAsync(url, !isForum ? forumChannelContent : textChannelContent);
-
-                if (response.StatusCode == HttpStatusCode.NoContent)
-                {
-                    _logger.LogWarning(
-                        "Successfully posted to Discord Channel after switching channel type - Change Forum Property in Config!!");
-                }
-                else
-                {
-                    _logger.LogError("Failed to post to Discord Channel after fallback attempts");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to post to Discord Channel: {Url}", url);
+                return ClampRetryDelay(TimeSpan.FromSeconds(seconds));
             }
         }
-
-        private async Task<HttpResponseMessage> TryAlternativeAsync(string url, HttpResponseMessage oldResponse)
+        catch (JsonException)
         {
-            try
-            {
-                var response = await SendGetAsync(url, USER_MIMICK);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    _userAgentCache.AddOrUpdate(url, USER_MIMICK, (_, _) => USER_MIMICK);
-                    return response;
-                }
-
-                response = await SendGetAsync(url, GOOGLE_FEED_FETCHER);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    _userAgentCache.AddOrUpdate(url, GOOGLE_FEED_FETCHER, (_, _) => GOOGLE_FEED_FETCHER);
-                    return response;
-                }
-
-                var uri = new Uri(url);
-                var baseUrl = uri.GetLeftPart(UriPartial.Authority);
-                var robotsUrl = new Uri(new Uri(baseUrl), "/robots.txt").AbsoluteUri;
-                var userAgents = await GetRobotsUserAgentsAsync(robotsUrl);
-
-                foreach (var userAgent in userAgents)
-                {
-                    response = await SendGetAsync(url, userAgent, acceptAny: true);
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        _userAgentCache.AddOrUpdate(url, userAgent, (_, _) => userAgent);
-                        return response;
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                _logger.LogError("Failed to fetch RSS Feed after fallback attempts: {Url} - {E}", url, e);
-            }
-
-            return oldResponse;
+            // Use the conservative fallback below for malformed rate-limit responses.
         }
 
-        private async Task<HttpResponseMessage> SendGetAsync(string url, string? userAgent = null, bool acceptAny = false)
-        {
-            await _throttle.WaitAsync();
+        return TimeSpan.FromSeconds(1);
+    }
 
-            try
-            {
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
+    private static TimeSpan ClampRetryDelay(TimeSpan delay)
+    {
+        return TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 250, 60_000));
+    }
 
-                if (!string.IsNullOrWhiteSpace(userAgent))
-                    request.Headers.UserAgent.ParseAdd(userAgent);
+    public static string SafeUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            return "<invalid-url>";
 
-                if (acceptAny)
-                    request.Headers.Add("Accept", "*/*");
+        if (uri.AbsolutePath.StartsWith("/api/webhooks/", StringComparison.OrdinalIgnoreCase))
+            return $"{uri.Scheme}://{uri.Host}/api/webhooks/[redacted]";
 
-                return await _innerClient.SendAsync(request);
-            }
-            finally
-            {
-                _throttle.Release();
-            }
-        }
-
-        private async Task<HttpResponseMessage> SendPostAsync(string url, StringContent content)
-        {
-            await _throttle.WaitAsync();
-
-            try
-            {
-                return await _innerClient.PostAsync(url, content);
-            }
-            finally
-            {
-                _throttle.Release();
-            }
-        }
-
-        private async Task<string> FetchRobotsContentAsync(string url)
-        {
-            try
-            {
-                var response = await SendGetAsync(url);
-
-                if (!response.IsSuccessStatusCode)
-                    return string.Empty;
-
-                return await response.Content.ReadAsStringAsync();
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private async Task<List<string>> GetRobotsUserAgentsAsync(string url)
-        {
-            var userAgents = new List<string>();
-
-            var robotsContent = await FetchRobotsContentAsync(url);
-
-            if (robotsContent == string.Empty)
-                return userAgents.OrderByDescending(x => x).Distinct().ToList();
-
-            var pattern = @"User-agent:\s*(?<agent>.+)";
-            var regex = new Regex(pattern);
-
-            var matches = regex.Matches(robotsContent);
-
-            foreach (Match match in matches)
-            {
-                var userAgent = match.Groups["agent"].Value.Trim();
-
-                if (!string.IsNullOrEmpty(userAgent))
-                    userAgents.Add(userAgent);
-            }
-
-            return userAgents.OrderByDescending(x => x).Distinct().ToList();
-        }
+        return uri.GetLeftPart(UriPartial.Path);
     }
 }
