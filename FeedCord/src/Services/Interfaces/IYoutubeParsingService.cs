@@ -4,6 +4,8 @@ namespace FeedCord.Services.Interfaces
 {
     public interface IYoutubeParsingService
     {
-        Task<Post?> GetXmlUrlAndFeed(string url, CancellationToken cancellationToken = default);
+        Task<List<Post?>> GetXmlUrlAndFeed(
+            string url,
+            CancellationToken cancellationToken = default);
     }
 }

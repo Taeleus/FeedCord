@@ -80,7 +80,10 @@ namespace FeedCord.Services
 
             _logAggregator.SetNewPostCount(allNewPosts.Count(post => post.ShouldNotify));
 
-            return allNewPosts.ToList();
+            return allNewPosts
+                .OrderBy(item => item.Post.PublishDate)
+                .ThenBy(item => PostIdentity.GetStableId(item.Post), StringComparer.Ordinal)
+                .ToList();
         }
 
         public async Task AcknowledgePostsAsync(
@@ -333,13 +336,10 @@ namespace FeedCord.Services
             string url,
             CancellationToken cancellationToken)
         {
-            Post? post;
-
             // Treat YouTube URLs with embedded xml directly as a feed source.
             if (IsYoutubeFeedUrl(url))
             {
-                post = await _rssParsingService.ParseYoutubeFeedAsync(url, cancellationToken);
-                return post == null ? new List<Post?>() : new List<Post?> { post };
+                return await _rssParsingService.ParseYoutubeFeedAsync(url, cancellationToken);
             }
 
             using var response = await _httpClient.GetAsyncWithFallback(url, cancellationToken);
@@ -356,9 +356,7 @@ namespace FeedCord.Services
             }
 
             var xmlContent = await GetResponseContentAsync(response, cancellationToken);
-            post = await _rssParsingService.ParseYoutubeFeedAsync(xmlContent, cancellationToken);
-
-            return post == null ? new List<Post?>() : new List<Post?> { post };
+            return await _rssParsingService.ParseYoutubeFeedAsync(xmlContent, cancellationToken);
         }
 
         private async Task<List<Post?>> FetchRssAsync(

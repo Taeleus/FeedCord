@@ -140,6 +140,77 @@ public class DeliverySemanticsTests
     }
 
     [Fact]
+    public async Task FeedManager_ReturnsEveryMissedYoutubeVideo_AfterPersistedCheckpoint()
+    {
+        var config = CreateConfig();
+        config.RssUrls = Array.Empty<string>();
+        config.YoutubeUrls =
+        [
+            "https://www.youtube.com/feeds/videos.xml?channel_id=fixture"
+        ];
+
+        var httpClient = new Mock<ICustomHttpClient>();
+        httpClient.Setup(client => client.GetAsyncWithFallback(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("<feed></feed>")
+            });
+
+        var missedPosts = new List<Post?>
+        {
+            CreatePost(new DateTimeOffset(2025, 6, 16, 12, 0, 0, TimeSpan.Zero)) with
+            {
+                ItemId = "video-16",
+                Title = "Video 16"
+            },
+            CreatePost(new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero)) with
+            {
+                ItemId = "video-15",
+                Title = "Video 15"
+            },
+            CreatePost(new DateTimeOffset(2025, 6, 14, 12, 0, 0, TimeSpan.Zero)) with
+            {
+                ItemId = "video-14",
+                Title = "Video 14"
+            }
+        };
+        var parser = new Mock<IRssParsingService>();
+        parser.Setup(service => service.ParseYoutubeFeedAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(missedPosts);
+
+        var stateStore = new Mock<IFeedStateStore>();
+        stateStore.Setup(store => store.LoadAsync(config.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, ReferencePost>
+            {
+                [config.YoutubeUrls[0]] = new()
+                {
+                    IsYoutube = true,
+                    LastRunDate = new DateTimeOffset(2025, 6, 13, 12, 0, 0, TimeSpan.Zero)
+                }
+            });
+
+        var manager = new FeedManager(
+            config,
+            httpClient.Object,
+            parser.Object,
+            new PostFilterService(config),
+            stateStore.Object,
+            new NullLogger<FeedManager>(),
+            Mock.Of<ILogAggregator>());
+
+        await manager.InitializeUrlsAsync();
+        var pending = await manager.CheckForNewPostsAsync();
+
+        Assert.Equal(
+            ["Video 14", "Video 15", "Video 16"],
+            pending.Select(item => item.Post.Title).ToArray());
+    }
+
+    [Fact]
     public async Task FeedWorker_DoesNotAcknowledgePost_WhenDeliveryFails()
     {
         var pendingPost = new PendingPost("https://example.com/rss", CreatePost(DateTimeOffset.UtcNow));

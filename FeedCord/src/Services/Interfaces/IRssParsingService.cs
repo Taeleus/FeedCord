@@ -8,7 +8,7 @@ namespace FeedCord.Services.Interfaces
             string xmlContent,
             int trim,
             CancellationToken cancellationToken = default);
-        Task<Post?> ParseYoutubeFeedAsync(
+        Task<List<Post?>> ParseYoutubeFeedAsync(
             string channelUrl,
             CancellationToken cancellationToken = default);
     }

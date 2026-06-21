@@ -3,13 +3,33 @@
       xmlns:media="http://search.yahoo.com/mrss/">
   <title>Fixture Channel</title>
   <entry>
-    <id>yt:video:fixture123</id>
-    <title>Fixture Video</title>
-    <link rel="alternate" href="https://www.youtube.com/watch?v=fixture123" />
-    <published>2025-06-20T12:00:00+00:00</published>
+    <id>yt:video:fixture16</id>
+    <title>Fixture Video 16</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=fixture16" />
+    <published>2025-06-16T12:00:00+00:00</published>
     <author><name>Fixture Creator</name></author>
     <media:group>
-      <media:thumbnail url="https://i.ytimg.com/vi/fixture123/hqdefault.jpg" />
+      <media:thumbnail url="https://i.ytimg.com/vi/fixture16/hqdefault.jpg" />
+    </media:group>
+  </entry>
+  <entry>
+    <id>yt:video:fixture15</id>
+    <title>Fixture Video 15</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=fixture15" />
+    <published>2025-06-15T12:00:00+00:00</published>
+    <author><name>Fixture Creator</name></author>
+    <media:group>
+      <media:thumbnail url="https://i.ytimg.com/vi/fixture15/hqdefault.jpg" />
+    </media:group>
+  </entry>
+  <entry>
+    <id>yt:video:fixture14</id>
+    <title>Fixture Video 14</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=fixture14" />
+    <published>2025-06-14T12:00:00+00:00</published>
+    <author><name>Fixture Creator</name></author>
+    <media:group>
+      <media:thumbnail url="https://i.ytimg.com/vi/fixture14/hqdefault.jpg" />
     </media:group>
   </entry>
 </feed>

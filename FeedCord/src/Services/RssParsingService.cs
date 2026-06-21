@@ -70,23 +70,22 @@ namespace FeedCord.Services
             }
         }
 
-        public async Task<Post?> ParseYoutubeFeedAsync(
+        public async Task<List<Post?>> ParseYoutubeFeedAsync(
             string youtubeInput,
             CancellationToken cancellationToken = default)
         {
-            var youtubePost = await _youtubeParsingService.GetXmlUrlAndFeed(
+            var youtubePosts = await _youtubeParsingService.GetXmlUrlAndFeed(
                 youtubeInput,
                 cancellationToken);
 
-            if (youtubePost is null)
+            if (youtubePosts.Count == 0)
             {
-                _logger.LogWarning(
-                    "Failed to parse YouTube feed. Input preview: {YoutubeInput}",
+                _logger.LogInformation(
+                    "YouTube feed contained no video entries. Input preview: {YoutubeInput}",
                     SafeForLog(youtubeInput));
-                throw new InvalidDataException("Failed to resolve or parse the YouTube feed.");
             }
 
-            return youtubePost;
+            return youtubePosts;
         }
 
         private static string SafeForLog(string? value, int maxLength = 300)

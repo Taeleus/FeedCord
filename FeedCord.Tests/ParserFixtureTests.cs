@@ -50,12 +50,14 @@ public class ParserFixtureTests
             client.Object,
             new NullLogger<YoutubeParsingService>());
 
-        var post = await service.GetXmlUrlAndFeed(
+        var posts = await service.GetXmlUrlAndFeed(
             "https://www.youtube.com/feeds/videos.xml?channel_id=fixture");
+        var post = posts[0];
 
+        Assert.Equal(3, posts.Count);
         Assert.NotNull(post);
-        Assert.Equal("yt:video:fixture123", post.ItemId);
-        Assert.Equal("Fixture Video", post.Title);
+        Assert.Equal("yt:video:fixture16", post.ItemId);
+        Assert.Equal("Fixture Video 16", post.Title);
         Assert.Equal(TimeSpan.Zero, post.PublishDate.Offset);
     }
 

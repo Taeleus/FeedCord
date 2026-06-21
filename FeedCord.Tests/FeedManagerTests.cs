@@ -352,7 +352,7 @@ namespace FeedCord.Tests
             rssParsingServiceMock.Setup(x => x.ParseYoutubeFeedAsync(
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Post?)null);
+                .ReturnsAsync(new List<Post?>());
 
             var postFilterService = new PostFilterService(config);
             var logger = new NullLogger<FeedManager>();

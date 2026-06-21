@@ -1,132 +1,132 @@
+using System.Xml.Linq;
 using FeedCord.Common;
 using FeedCord.Services.Interfaces;
-using System.Xml.Linq;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 
-namespace FeedCord.Infrastructure.Parsers
+namespace FeedCord.Infrastructure.Parsers;
+
+public class YoutubeParsingService : IYoutubeParsingService
 {
-    public class YoutubeParsingService : IYoutubeParsingService
+    private static readonly XNamespace AtomNamespace = "http://www.w3.org/2005/Atom";
+    private static readonly XNamespace MediaNamespace = "http://search.yahoo.com/mrss/";
+    private readonly ICustomHttpClient _httpClient;
+    private readonly ILogger<YoutubeParsingService> _logger;
+
+    public YoutubeParsingService(
+        ICustomHttpClient httpClient,
+        ILogger<YoutubeParsingService> logger)
     {
-        private readonly ICustomHttpClient _httpClient;
-        private readonly ILogger<YoutubeParsingService> _logger;
-        public YoutubeParsingService(ICustomHttpClient httpClient, ILogger<YoutubeParsingService> logger)
+        _httpClient = httpClient;
+        _logger = logger;
+    }
+
+    public async Task<List<Post?>> GetXmlUrlAndFeed(
+        string input,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsFeedUrl(input))
+            return await GetPostsAsync(input, cancellationToken);
+
+        var document = new HtmlDocument();
+        document.LoadHtml(input);
+
+        var node = document.DocumentNode.SelectSingleNode(
+            "//link[@rel='alternate' and @type='application/rss+xml']");
+        if (node is null)
+            throw new InvalidDataException("No YouTube RSS feed link was found in the channel page.");
+
+        var feedUrl = node.GetAttributeValue("href", string.Empty);
+        return await GetPostsAsync(feedUrl, cancellationToken);
+    }
+
+    private async Task<List<Post?>> GetPostsAsync(
+        string feedUrl,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(feedUrl))
+            throw new InvalidDataException("The YouTube RSS feed URL is empty.");
+
+        try
         {
-            _httpClient = httpClient;
-            _logger = logger;
-        }
+            using var response = await _httpClient.GetAsyncWithFallback(feedUrl, cancellationToken);
+            if (response is null)
+                throw new HttpRequestException("YouTube returned no response.");
 
-        public async Task<Post?> GetXmlUrlAndFeed(
-            string xml,
-            CancellationToken cancellationToken = default)
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"YouTube feed returned HTTP {response.StatusCode}.",
+                    null,
+                    response.StatusCode);
+            }
+
+            var xmlContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            var document = XDocument.Parse(xmlContent);
+            if (document.Root is null ||
+                document.Root.Name != AtomNamespace + "feed")
+            {
+                throw new InvalidDataException("YouTube response was not an Atom feed.");
+            }
+
+            var channelTitle = document.Root.Element(AtomNamespace + "title")?.Value
+                ?? string.Empty;
+
+            return document.Root
+                .Elements(AtomNamespace + "entry")
+                .Select(entry => BuildPost(entry, channelTitle))
+                .Cast<Post?>()
+                .ToList();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (IsFeedUrl(xml))
-            {
-                return await GetRecentPost(xml, cancellationToken);
-            }
-
-
-            var doc = new HtmlDocument();
-            doc.LoadHtml(xml);
-
-            var node = doc.DocumentNode.SelectSingleNode("//link[@rel='alternate' and @type='application/rss+xml']");
-
-            if (node != null)
-            {
-                var hrefValue = node.GetAttributeValue("href", "");
-                return await GetRecentPost(hrefValue, cancellationToken);
-            }
-
-            _logger.LogWarning("No RSS feed link found in the provided XML.");
-            return null;
+            throw;
         }
-
-        private static bool IsFeedUrl(string value)
+        catch (Exception ex)
         {
-            return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-                   (uri.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
-                    uri.AbsolutePath.Equals("/feeds/videos.xml", StringComparison.OrdinalIgnoreCase));
+            _logger.LogError(ex, "Error retrieving YouTube RSS feed from {Url}", feedUrl);
+            throw new InvalidDataException(
+                $"Failed to retrieve or parse YouTube feed '{feedUrl}'.",
+                ex);
         }
+    }
 
-        private async Task<Post?> GetRecentPost(
-            string xmlUrl,
-            CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrEmpty(xmlUrl))
-            {
-                return null;
-            }
+    private static Post BuildPost(XElement entry, string channelTitle)
+    {
+        var publishedValue = entry.Element(AtomNamespace + "published")?.Value;
+        if (!DateTimeOffset.TryParse(publishedValue, out var published))
+            throw new InvalidDataException("YouTube entry has no valid publication date.");
 
-            try
-            {
-                using var response = await _httpClient.GetAsyncWithFallback(xmlUrl, cancellationToken);
+        return new Post(
+            entry.Element(AtomNamespace + "title")?.Value ?? string.Empty,
+            entry.Element(MediaNamespace + "group")
+                ?.Element(MediaNamespace + "thumbnail")
+                ?.Attribute("url")
+                ?.Value ?? string.Empty,
+            string.Empty,
+            entry.Elements(AtomNamespace + "link")
+                .FirstOrDefault(link =>
+                    string.Equals(
+                        link.Attribute("rel")?.Value,
+                        "alternate",
+                        StringComparison.OrdinalIgnoreCase))
+                ?.Attribute("href")
+                ?.Value
+                ?? entry.Element(AtomNamespace + "link")?.Attribute("href")?.Value
+                ?? string.Empty,
+            channelTitle,
+            published.ToUniversalTime(),
+            entry.Element(AtomNamespace + "author")
+                ?.Element(AtomNamespace + "name")
+                ?.Value ?? string.Empty,
+            Array.Empty<string>(),
+            entry.Element(AtomNamespace + "id")?.Value);
+    }
 
-                if (response is null) return null;
-
-                // Check for success status code before processing
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Failed to fetch YouTube feed from {Url}: HTTP {StatusCode}", xmlUrl, response.StatusCode);
-                    return null;
-                }
-
-                var xmlContent = await response.Content.ReadAsStringAsync(cancellationToken);
-
-                // Validate content is XML before parsing
-                if (string.IsNullOrWhiteSpace(xmlContent) ||
-                    !xmlContent.Contains("<feed", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning(
-                        "Invalid YouTube feed response from {Url}. Response did not contain an Atom feed.",
-                        xmlUrl);
-
-                    return null;
-                }
-
-                var xdoc = XDocument.Parse(xmlContent);
-                if (xdoc.Root == null) return null;
-
-                XNamespace atomNs = "http://www.w3.org/2005/Atom";
-                XNamespace mediaNs = "http://search.yahoo.com/mrss/";
-
-                var channelTitle = xdoc.Root.Element(atomNs + "title")?.Value ?? string.Empty;
-                var videoEntry = xdoc.Root.Element(atomNs + "entry");
-
-                if (videoEntry is null)
-                {
-                    return null;
-                }
-
-                var videoTitle = videoEntry.Element(atomNs + "title")?.Value ?? string.Empty;
-                var videoId = videoEntry.Element(atomNs + "id")?.Value ?? string.Empty;
-                var videoLink = videoEntry.Element(atomNs + "link")?.Attribute("href")?.Value ?? string.Empty;
-                var videoThumbnail = videoEntry.Element(mediaNs + "group")?.Element(mediaNs + "thumbnail")?.Attribute("url")?.Value ?? string.Empty;
-                var publishedValue = videoEntry.Element(atomNs + "published")?.Value;
-                if (!DateTimeOffset.TryParse(publishedValue, out var videoPublished))
-                    throw new InvalidDataException("YouTube entry has no valid publication date.");
-                var videoAuthor = videoEntry.Element(atomNs + "author")?.Element(atomNs + "name")?.Value ?? string.Empty;
-
-
-                return new Post(
-                    videoTitle,
-                    videoThumbnail,
-                    string.Empty,
-                    videoLink,
-                    channelTitle,
-                    videoPublished.ToUniversalTime(),
-                    videoAuthor,
-                    Array.Empty<string>(),
-                    videoId);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving YouTube RSS feed from {Url}", xmlUrl);
-                throw new InvalidDataException($"Failed to retrieve or parse YouTube feed '{xmlUrl}'.", ex);
-            }
-        }
+    private static bool IsFeedUrl(string value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+               (uri.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+                uri.AbsolutePath.Equals("/feeds/videos.xml", StringComparison.OrdinalIgnoreCase));
     }
 }
