@@ -1,282 +1,230 @@
+# FeedCord configuration reference
 
-## appsettings.json reference
+FeedCord reads configuration from `appsettings.json`. Configuration is loaded once during startup; restart FeedCord after changing the file.
 
-Your `appsettings.json` is a collection of `instances`:
+## Complete example
 
-```
+```json
 {
-    "Instances": []
-}
-```
-Each Discord Channel is considered one instance, and gets one Webhook:
-
-At least one instance is required, and every `Id` must be unique regardless of letter casing.
-
-```
-{
-     "Id": "Gaming News Channel",
-     "RssUrls": [
-       "https://examplesrssfeed1.com/rss",
-       "https://examplesrssfeed2.com/rss",
-       "https://examplesrssfeed3.com/rss",
-     ],
-     "YoutubeUrls": [ "" ],
-     "DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-     "RssCheckIntervalMinutes": 3,
-     "EnableAutoRemove": true,
-     "Color": 8411391,
-     "DescriptionLimit": 200,
-     "Forum": true
-}
-```
-
-Here is an example of running two news channels:
-
-```
-{
-	"Instances": [
-		{
-			"Id": "Gaming News Channel",
-			"Username": "Gaming News",
-			"RssUrls": [
-				"https://examplesrssfeed1.com/rss",
-				"https://examplesrssfeed2.com/rss",
-				"https://examplesrssfeed3.com/rss"
-			],
-			"YoutubeUrls": [ "" ],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 3,
-			"EnableAutoRemove": true,
-			"Color": 8411391,
-			"DescriptionLimit": 200,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": false
-		},
-		{
-			"Id": "Tech News Channel",
-			"Username": "Tech News",
-			"RssUrls": [
-				"https://examplesrssfeed4.com/rss",
-				"https://examplesrssfeed5.com/rss",
-				"https://examplesrssfeed6.com/rss"
-			],
-			"YoutubeUrls": [ "" ],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 3,
-			"EnableAutoRemove": true,
-			"Color": 8411391,
-			"DescriptionLimit": 200,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": false
-		}
-	],
-	
-}
-
-```
-
-Some properties are required while others are optional. A bare-bones `appsettings.json` file would look like this:
-
-```
-{
-	"Instances": [
-		{
-			"Id": "Runescape Feed",
-			"YoutubeUrls": [
-				""
-			],
-			"RssUrls": [
-				"https://github.com/Taeleus/FeedCord/releases.atom"
-			],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 15,
-			"Color": 8411391,
-			"DescriptionLimit": 500,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": true
-		}
-	],
-	"ConcurrentRequests": 40
-}
-```
-### Concurrent Requests
-
-You have two `ConcurrentRequest` properties. One that lives outside the Instance array, and the other that lives for each instance.
-
-Let's take a look here for example. This is outside of your instance. This controls the maximum amount of requests that can be made at the same time. This blankets over all instances. So a `ConcurrentRequests` value of 5 here says that no matter how may instances I have running, only allow 5 requests being made at any given time. This is to help throttle your whole application for control if needed:
-
-```
-{
-	"Instances": [ ..All of My Instances.. ],
-	"ConcurrentRequests": 5
+  "Instances": [
+    {
+      "Id": "Engineering News",
+      "RssUrls": [
+        "https://github.com/Taeleus/FeedCord/releases.atom"
+      ],
+      "YoutubeUrls": [],
+      "DiscordWebhookUrl": "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN",
+      "RssCheckIntervalMinutes": 15,
+      "DescriptionLimit": 500,
+      "Color": 8411391,
+      "Forum": false,
+      "MarkdownFormat": false,
+      "PersistState": true,
+      "EnableAutoRemove": false,
+      "ConcurrentRequests": 5,
+      "Username": "Engineering News",
+      "AvatarUrl": "https://example.com/feedcord-avatar.png",
+      "AuthorName": null,
+      "AuthorUrl": null,
+      "AuthorIcon": null,
+      "FallbackImage": "https://example.com/fallback.png",
+      "FooterImage": "https://example.com/footer.png",
+      "PostFilters": [
+        {
+          "Url": "https://github.com/Taeleus/FeedCord/releases.atom",
+          "Filters": [
+            "release",
+            "label:security"
+          ]
+        }
+      ]
+    }
+  ],
+  "ConcurrentRequests": 20
 }
 ```
 
-Now for this example we will show a `ConcurrentRequest` inside of an instance. This will only throttle the YouTube & RSS Urls in that instance. So a `ConcurrentRequests` value of 1 here says that we only allow one request to be made at any given time for the `Gaming` instance. This is if you want to have control only for certain urls/domains. Useful if you need to respect a websites policy or to not spam a domain:
+## Top-level properties
 
-```
+| Property | Required | Default | Valid values | Description |
+| --- | --- | --- | --- | --- |
+| `Instances` | Yes | None | One or more instance objects | Each instance runs an independent feed worker and publishes to one Discord webhook. `Id` values must be unique, ignoring letter case. |
+| `ConcurrentRequests` | No | `20` | `1`–`100` | Maximum simultaneous HTTP requests across every instance. |
+
+An empty `Instances` array is invalid.
+
+## Instance properties
+
+### Feed and delivery settings
+
+| Property | Required | Default | Valid values | Description |
+| --- | --- | --- | --- | --- |
+| `Id` | Yes | None | Non-empty unique string | Identifies the instance in logs and persisted state. IDs are compared case-insensitively. |
+| `RssUrls` | Yes | None | Array of absolute HTTP/HTTPS URLs | RSS or Atom feeds. Use `[]` when unused. |
+| `YoutubeUrls` | Yes | None | Array of absolute HTTP/HTTPS URLs | YouTube channel pages or direct YouTube Atom feed URLs. Use `[]` when unused. |
+| `DiscordWebhookUrl` | Yes | None | HTTPS Discord webhook URL | Destination webhook. Treat this value as a credential. |
+| `RssCheckIntervalMinutes` | Yes | `0`, which fails validation | `1`–`1440` | Delay between completed feed-check cycles. |
+| `DescriptionLimit` | Yes | `0` | `0`–`4096` | Maximum post-description length. `0` leaves parsed descriptions untrimmed; Discord payloads are still capped at API limits. |
+| `Forum` | No | `false` | Boolean | Use Discord forum-thread payloads when `true`; use text-channel payloads when `false`. |
+| `MarkdownFormat` | No | `false` | Boolean | Send a Markdown content message instead of a Discord embed. |
+| `PersistState` | No | `false` | Boolean | Save delivery checkpoints after every accepted or filtered post and during graceful shutdown. |
+| `EnableAutoRemove` | No | `false` | Boolean | Remove a feed from the running instance after three consecutive fetch or parse failures. Removal lasts until FeedCord restarts. |
+| `ConcurrentRequests` | No | `5` | `1`–`100` | Maximum simultaneous feed operations within this instance. The top-level request limit still applies. |
+
+Both URL arrays must exist, and at least one non-empty feed URL must be configured across them.
+
+`PersistenceOnShutdown` remains accepted as a legacy alias for `PersistState`. New configurations should use `PersistState`.
+
+### Discord appearance settings
+
+| Property | Required | Default | Description |
+| --- | --- | --- | --- |
+| `Username` | No | `FeedCord` | Webhook display name. Payloads are limited to Discord's 80-character username limit. |
+| `AvatarUrl` | No | None | HTTP/HTTPS webhook avatar URL. Invalid schemes are omitted. |
+| `AuthorName` | No | Feed author | Overrides the author name displayed in embeds. |
+| `AuthorUrl` | No | None | HTTP/HTTPS link attached to the embed author. Invalid schemes are omitted. |
+| `AuthorIcon` | No | None | HTTP/HTTPS icon URL for the embed author. Invalid schemes are omitted. |
+| `FallbackImage` | No | None | HTTP/HTTPS image used when FeedCord cannot extract a post image. |
+| `FooterImage` | No | None | HTTP/HTTPS icon displayed in the embed footer. |
+| `Color` | No | `0` | Decimal Discord embed color from `0` through `16777215`. |
+
+Feed-supplied Discord mentions are disabled. Invalid post, image, author, avatar, and footer URLs are omitted from webhook payloads.
+
+## Multiple instances
+
+Each instance can use separate feeds, formatting, request limits, persistence behavior, and webhook destinations.
+
+```json
 {
-	"Instances": [
-		{
-			"Id": "Gaming",
-			
-			..My Other Properties..
-			
-			"ConcurrentRequests": 1
-		}
-	],
-	"ConcurrentRequests": 40
+  "Instances": [
+    {
+      "Id": "Gaming",
+      "RssUrls": [
+        "https://example.com/gaming.xml"
+      ],
+      "YoutubeUrls": [],
+      "DiscordWebhookUrl": "https://discord.com/api/webhooks/GAMING_ID/GAMING_TOKEN",
+      "RssCheckIntervalMinutes": 10,
+      "DescriptionLimit": 500,
+      "Color": 3447003,
+      "Forum": false,
+      "MarkdownFormat": false,
+      "PersistState": true,
+      "ConcurrentRequests": 3
+    },
+    {
+      "Id": "Security",
+      "RssUrls": [
+        "https://example.com/security.xml"
+      ],
+      "YoutubeUrls": [
+        "https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID"
+      ],
+      "DiscordWebhookUrl": "https://discord.com/api/webhooks/SECURITY_ID/SECURITY_TOKEN",
+      "RssCheckIntervalMinutes": 5,
+      "DescriptionLimit": 1000,
+      "Color": 15158332,
+      "Forum": true,
+      "MarkdownFormat": false,
+      "PersistState": true,
+      "ConcurrentRequests": 5
+    }
+  ],
+  "ConcurrentRequests": 20
 }
 ```
 
-### Post Filters
+## Post filters
 
-Post filters are useful if you are looking to sift out specific content from an RSS Feed. The `PostFilter` property is an array of objects. Each object has a `Url` & `Filters`. This allows you to set a specific filter for each url, but if you are looking to apply a general filter to all urls you can do that as well - see below:
+`PostFilters` is optional. Each filter object contains:
 
-```
+| Property | Required | Description |
+| --- | --- | --- |
+| `Url` | Yes | Exact configured feed URL, or `"all"` for a fallback filter. |
+| `Filters` | Yes | One or more non-empty filter strings. |
+
+Plain filters match the post title or description, case-insensitively. Prefix a filter with `label:` to match an exact feed label:
+
+```json
 {
-	"Instances": [
-		{
-			"Id": "FeedCord",
-			"YoutubeUrls": [
-				""
-			],
-			"RssUrls": [
-				"https://github.com/Taeleus/FeedCord/releases.atom"
-			],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 15,
-			"Color": 8411391,
-			"DescriptionLimit": 500,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": true,
-			"ConcurrentRequests": 10,
-			"PostFilters": [
-			{
-				"Url": "https://github.com/Taeleus/FeedCord/releases.atom",
-				"Filters": ["release", "new feature"]
-			}
-		]
-		}
-	],
-	"ConcurrentRequests": 40
+  "PostFilters": [
+    {
+      "Url": "https://example.com/releases.atom",
+      "Filters": [
+        "release",
+        "security fix",
+        "label:critical"
+      ]
+    },
+    {
+      "Url": "all",
+      "Filters": [
+        "announcement"
+      ]
+    }
+  ]
 }
 ```
 
-As you can see above we did the following:
+Filter behavior:
 
-- Assign our RssUrl a Filter by providing the direct url
-- Assign two string values that must be contained in the posts content, otherwise skipped.
+- An exact URL filter takes precedence over `"all"`.
+- A post is included when any configured filter matches.
+- If no exact or `"all"` filter applies, the post is included.
+- Filtered posts are checkpointed without being sent and are not reconsidered during later cycles.
 
-Here is an example of two urls with each their own filter:
+## YouTube feeds and catch-up
 
-```
-{
-	"Instances": [
-		{
-			"Id": "FeedCord",
-			"YoutubeUrls": [
-				""
-			],
-			"RssUrls": [
-				"https://github.com/Taeleus/FeedCord/releases.atom",
-				"https://github.com/qolors/Clam-Shell/releases.atom"
-			],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 15,
-			"Color": 8411391,
-			"DescriptionLimit": 500,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": true,
-			"ConcurrentRequests": 10,
-			"PostFilters": [
-			{
-				"Url": "https://github.com/Taeleus/FeedCord/releases.atom",
-				"Filters": ["release", "new feature"]
-			},
-			{
-				"Url": "https://github.com/qolors/Clam-Shell/releases.atom",
-				"Filters": ["phishing"]
-			}
-		]
-		}
-	],
-	"ConcurrentRequests": 40
-}
-```
-Great. But what if we have like 30 urls that we want to apply the same filter to? It could get quite tedious..
+Direct YouTube Atom feeds are the most reliable:
 
-Luckily you can simply do this to do a filter for all feeds - set `Url` equal to `all`:
-
-```
-{
-	"Instances": [
-		{
-			"Id": "FeedCord",
-			"YoutubeUrls": [
-				""
-			],
-			"RssUrls": [
-				"https://github.com/Taeleus/FeedCord/releases.atom",
-				"https://github.com/qolors/Clam-Shell/releases.atom"
-			],
-			"DiscordWebhookUrl": "https://discord.com/api/webhooks/...",
-			"RssCheckIntervalMinutes": 15,
-			"Color": 8411391,
-			"DescriptionLimit": 500,
-			"Forum": true,
-			"MarkdownFormat": false,
-			"PersistState": true,
-			"ConcurrentRequests": 10,
-			"PostFilters": [
-			{
-				"Url": "all",
-				"Filters": ["release", "new feature", "phishing"]
-			}
-		]
-		}
-	],
-	"ConcurrentRequests": 40
-}
+```text
+https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID
 ```
 
+Channel-page URLs are supported when the page exposes an RSS link.
 
----
+FeedCord processes every entry present in the Atom feed that is newer than the persisted checkpoint and posts missed videos oldest first. Catch-up is limited to entries YouTube still exposes in that feed; FeedCord cannot recover older videos that have already fallen outside YouTube's feed window.
 
-## Property References
+## Persistence
 
-### Required
+When `PersistState` is enabled, FeedCord stores state at:
 
-- **Id**: The unique name of the RSS Feed Service. Helpful for logging purposes.
-- **RssUrls**: The list of RSS Feeds you want to get posts from.
-- **YoutubeUrls**: The list of RSS Feeds you want to get posts from.
-- **DiscordWebhookUrl**: The created Webhook from your designated Discord Text Channel.
-- **RssCheckIntervalMinutes**: How often you want to check for new Posts from all of your Url feeds in minutes.
-- **Color**: Decimal color of the embedded message, from 0 through 16777215.
-- **DescriptionLimit**: Limits the length of the description of the post to this number.
-- **Forum**: Determines if the post will be sent to a Forum type channel.
-- **MarkdownFormat**: If set true, will post feed item in markdown instead of an Embed.
-- **PersistState**: If set true, stores delivery checkpoints after successful posts and during graceful shutdown. Checkpoints use UTC publication times plus feed item IDs, so separate items sharing a timestamp are not skipped. Mount `/app/state` when using Docker so checkpoints survive container replacement.
+```text
+state/feed-state.json
+```
 
-`PersistenceOnShutdown` remains accepted as a legacy alias for `PersistState`.
+For Docker deployments, mount `/app/state` to persistent host storage:
 
-### Optional
+```bash
+-v "/absolute/path/feedcord-state:/app/state"
+```
 
+The state directory must be writable by the container application user, UID `1654` in the official .NET image.
 
-- **Username**: The name of the bot that will be sending the messages.
-- **EnableAutoRemove**: If set to true - FeedCord will kick a url out of the list after 3 failed attempts to parse the content.
-- **AvatarUrl**: The displayed icon for the bot.
-- **AuthorIcon**: The icon displayed for the Author.
-- **AuthorName**: Display name of Author.
-- **AuthorUrl**: The external link it will send users to when they click on the Author's Name.
-- **FallbackImage**: FeedCord always attempts to grab the webpage's image from metadata. If for some reason this fails, it will display this image instead.
-- **ConcurrentRequests**: How many requests FeedCord can have going at once.
-- **ConcurrentRequests (Inside Instance)**: How many requests the instance itself can have going at once.
-- **PostFilters**: A collection of phrases/words that are used to filter out RSS Items (filters the Title & Content)
+State behavior:
 
----
+- A checkpoint is saved after each successfully delivered post.
+- Filtered posts are also checkpointed.
+- Failed Discord deliveries are not checkpointed and are retried.
+- Publication times and stable item IDs prevent posts sharing a timestamp from being skipped.
+- State writes use an atomic temporary-file replacement.
+- Existing `feed_dump.csv` timestamps are imported when no JSON state exists.
+- A malformed JSON state file is preserved with a `.corrupt-<timestamp>` suffix before FeedCord starts with empty state.
+
+## Reserved configuration
+
+`Pings` exists in the current configuration model but is not implemented. It has no effect and should be omitted.
+
+## Validation summary
+
+FeedCord refuses to start when:
+
+- No instances are configured.
+- Two instance IDs differ only by letter case.
+- Both feed arrays contain no usable URLs.
+- A feed URL is not an absolute HTTP or HTTPS URL.
+- The Discord webhook is not a valid HTTPS Discord webhook URL.
+- An interval, request limit, description limit, or color is outside its documented range.
+- A post-filter URL or filter value is empty.
+
+Configuration is loaded only during startup. Restart FeedCord after modifying `appsettings.json`.
