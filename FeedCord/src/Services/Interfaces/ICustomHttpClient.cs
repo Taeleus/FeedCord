@@ -7,6 +7,9 @@ namespace FeedCord.Services.Interfaces
         Task<HttpResponseMessage?> GetAsyncWithFallback(
             string url,
             CancellationToken cancellationToken = default);
+        Task<HttpResponseMessage?> GetPublicAsync(
+            string url,
+            CancellationToken cancellationToken = default);
         Task<bool> PostAsyncWithFallback(
             string url,
             StringContent forumChannelContent,

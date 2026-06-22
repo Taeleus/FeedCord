@@ -21,21 +21,22 @@ namespace FeedCord.Core
 
             var payload = new
             {
-                username = _config.Username ?? "FeedCord",
-                avatar_url = _config.AvatarUrl ?? "",
+                username = Truncate(_config.Username ?? "FeedCord", 80),
+                avatar_url = SanitizeHttpUrl(_config.AvatarUrl),
+                allowed_mentions = BuildAllowedMentions(),
                 embeds = new[]
                 {
                     new
                     {
-                        title = Truncate(post.Title, 256),
+                        title = SanitizeTitle(post),
                         author = BuildAuthor(_config.AuthorName ?? post.Author),
-                        url = post.Link,
+                        url = SanitizeHttpUrl(post.Link),
                         description = Truncate(post.Description, 4096),
                         image = BuildImage(post.ImageUrl),
                         footer = new
                         {
-                            text = $"{post.Tag} - {post.PublishDate:MM/dd/yyyy h:mm tt}",
-                            icon_url = _config.FooterImage ?? ""
+                            text = BuildFooterText(post),
+                            icon_url = SanitizeHttpUrl(_config.FooterImage)
                         },
                         color = _config.Color,
                     }
@@ -59,24 +60,25 @@ namespace FeedCord.Core
             var payload = new
             {
                 content = Truncate(post.Tag, 2000),
+                allowed_mentions = BuildAllowedMentions(),
                 embeds = new[]
                 {
                     new
                     {
-                        title = Truncate(post.Title, 256),
+                        title = SanitizeTitle(post),
                         author = BuildAuthor(_config.AuthorName ?? post.Author),
-                        url = post.Link,
+                        url = SanitizeHttpUrl(post.Link),
                         description = Truncate(post.Description, 4096),
                         image = BuildImage(post.ImageUrl),
                         footer = new
                         {
-                            text = $"{post.Tag} - {post.PublishDate:MM/dd/yyyy h:mm tt}",
-                            icon_url = _config.FooterImage ?? ""
+                            text = BuildFooterText(post),
+                            icon_url = SanitizeHttpUrl(_config.FooterImage)
                         },
                         color = _config.Color,
                     }
                 },
-                thread_name = Truncate(post.Title, 100)
+                thread_name = SanitizeThreadName(post.Title)
             };
 
             var payloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -90,6 +92,9 @@ namespace FeedCord.Core
 
         private StringContent GenerateMarkdown(Post post)
         {
+            var source = SanitizeHttpUrl(post.Link) is { } safeLink
+                ? $"[Source]({safeLink})"
+                : string.Empty;
             var markdownPost = $"""
                                 # {post.Title}
 
@@ -99,7 +104,7 @@ namespace FeedCord.Core
 
                                 {post.Description}
 
-                                [Source]({post.Link})
+                                {source}
 
                                 """;
             object payload;
@@ -109,14 +114,16 @@ namespace FeedCord.Core
                 payload = new
                 {
                     content = Truncate(markdownPost, 2000),
-                    thread_name = Truncate(post.Title, 100)
+                    thread_name = SanitizeThreadName(post.Title),
+                    allowed_mentions = BuildAllowedMentions()
                 };
             }
             else
             {
                 payload = new
                 {
-                    content = Truncate(markdownPost, 2000)
+                    content = Truncate(markdownPost, 2000),
+                    allowed_mentions = BuildAllowedMentions()
                 };
             }
 
@@ -137,15 +144,63 @@ namespace FeedCord.Core
             return new
             {
                 name = Truncate(name, 256),
-                url = _config.AuthorUrl,
-                icon_url = _config.AuthorIcon
+                url = SanitizeHttpUrl(_config.AuthorUrl),
+                icon_url = SanitizeHttpUrl(_config.AuthorIcon)
             };
         }
 
         private object? BuildImage(string? postImageUrl)
         {
             var imageUrl = string.IsNullOrWhiteSpace(postImageUrl) ? _config.FallbackImage : postImageUrl;
-            return string.IsNullOrWhiteSpace(imageUrl) ? null : new { url = imageUrl };
+            var safeImageUrl = SanitizeHttpUrl(imageUrl);
+            return safeImageUrl is null ? null : new { url = safeImageUrl };
+        }
+
+        private static object BuildAllowedMentions()
+        {
+            return new { parse = Array.Empty<string>() };
+        }
+
+        private static string BuildFooterText(Post post)
+        {
+            return Truncate($"{post.Tag} - {post.PublishDate:MM/dd/yyyy h:mm tt}", 1024);
+        }
+
+        private static string SanitizeTitle(Post post)
+        {
+            var title = RemoveControlCharacters(post.Title).Trim();
+            if (string.IsNullOrWhiteSpace(title))
+                title = "FeedCord post";
+
+            return Truncate(title, 256);
+        }
+
+        private static string SanitizeThreadName(string? value)
+        {
+            var threadName = RemoveControlCharacters(value).Trim();
+            if (string.IsNullOrWhiteSpace(threadName))
+                threadName = "FeedCord post";
+
+            return Truncate(threadName, 100);
+        }
+
+        private static string RemoveControlCharacters(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            return new string(value.Where(character => !char.IsControl(character)).ToArray());
+        }
+
+        private static string? SanitizeHttpUrl(string? value)
+        {
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return null;
+            }
+
+            return uri.AbsoluteUri;
         }
 
         private static string Truncate(string? value, int maxLength)

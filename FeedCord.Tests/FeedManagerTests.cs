@@ -23,7 +23,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = null
             };
 
@@ -46,7 +46,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = new List<PostFilters>
                 {
                     new PostFilters
@@ -76,7 +76,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = new List<PostFilters>
                 {
                     new PostFilters
@@ -106,7 +106,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = null
             };
 
@@ -146,7 +146,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = new List<PostFilters>
                 {
                     new PostFilters
@@ -200,7 +200,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = new List<PostFilters>
                 {
                     new PostFilters
@@ -254,7 +254,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = null
             };
 
@@ -290,7 +290,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = null
             };
 
@@ -335,7 +335,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = null
             };
 
@@ -379,7 +379,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 PostFilters = new List<PostFilters>
                 {
                     new PostFilters
@@ -433,7 +433,7 @@ namespace FeedCord.Tests
                 DescriptionLimit = 1,
                 Forum = false,
                 MarkdownFormat = false,
-                PersistenceOnShutdown = false,
+                PersistState = false,
                 EnableAutoRemove = true,
                 PostFilters = null
             };

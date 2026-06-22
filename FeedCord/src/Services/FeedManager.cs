@@ -117,7 +117,7 @@ namespace FeedCord.Services
 
             feedState.ErrorCount = 0;
 
-            if (_config.PersistenceOnShutdown)
+            if (_config.PersistState)
                 await SaveStateAsync(cancellationToken);
         }
 

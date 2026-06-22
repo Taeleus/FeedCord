@@ -19,18 +19,20 @@ This repository is the Taeleus fork of [Qolors/FeedCord](https://github.com/Qolo
 - Durable, per-instance delivery checkpoints
 - Automatic migration from the legacy `feed_dump.csv` format
 - Multi-architecture container images for `linux/amd64` and `linux/arm64`
+- Non-root container execution with a built-in heartbeat health check
 
 ![FeedCord gallery example](FeedCord/docs/images/gallery1.png)
 
 ## Delivery behavior
 
-FeedCord checkpoints a feed only after Discord accepts the complete batch of new posts from that feed.
+FeedCord checkpoints each post after Discord accepts it. Filtered posts are checkpointed without being sent.
 
 This provides at-least-once delivery:
 
 - Failed Discord deliveries are retried during the next feed check.
 - Posts are not silently discarded when Discord is unavailable.
-- A crash after Discord accepts a post but before its checkpoint is saved can produce a duplicate.
+- If a later post fails, earlier successful posts remain checkpointed and are not resent.
+- A crash after Discord accepts a post but before its checkpoint is saved can still produce a duplicate.
 
 Checkpoints use UTC publication times and stable feed-item IDs. Separate posts that share the same publication timestamp are therefore processed independently.
 
@@ -39,7 +41,7 @@ Checkpoints use UTC publication times and stable feed-item IDs. Separate posts t
 Choose one:
 
 - Docker or another OCI-compatible container runtime
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) for source builds
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) for source builds
 
 You also need:
 
@@ -66,7 +68,7 @@ Create an `appsettings.json` file:
       "Color": 8411391,
       "Forum": false,
       "MarkdownFormat": false,
-      "PersistenceOnShutdown": true,
+      "PersistState": true,
       "EnableAutoRemove": false,
       "ConcurrentRequests": 5
     }
@@ -77,6 +79,8 @@ Create an `appsettings.json` file:
 
 Important constraints:
 
+- At least one instance must be configured.
+- Instance IDs must be unique, ignoring letter case.
 - `Id` must identify the instance.
 - `RssUrls` and `YoutubeUrls` must both exist; use an empty array when unused.
 - At least one feed URL must be configured.
@@ -84,6 +88,7 @@ Important constraints:
 - `DiscordWebhookUrl` must be an HTTPS Discord webhook URL.
 - `RssCheckIntervalMinutes` must be between 1 and 1440.
 - `DescriptionLimit` must be between 0 and 4096.
+- `Color` must be a Discord decimal color value between 0 and 16777215.
 - Global and per-instance `ConcurrentRequests` must be between 1 and 100.
 
 See the complete [configuration reference](FeedCord/docs/reference.md) for optional appearance settings, filters, and multi-instance examples.
@@ -105,6 +110,8 @@ Channel-page URLs are also supported when the page exposes its feed link:
   ]
 }
 ```
+
+YouTube catch-up is limited to entries still present in the channel's Atom feed. FeedCord posts every available entry newer than its checkpoint, oldest first, but it cannot recover videos that YouTube has already removed from that feed window.
 
 ### Post filters
 
@@ -156,7 +163,10 @@ Available image tags:
 - `beta`: current `development` build
 - Commit SHA tags for immutable deployments
 
-The state mount is required if `PersistenceOnShutdown` is enabled and checkpoints must survive container replacement.
+The state mount is required if `PersistState` is enabled and checkpoints must survive container replacement.
+
+The container runs as the non-root .NET application user and reports health from an internal heartbeat updated every 30 seconds.
+Ensure the host state directory is writable by the container's application user (UID `1654` in the official .NET image).
 
 ## Run from source
 
@@ -170,7 +180,7 @@ dotnet run --project FeedCord -- /absolute/path/appsettings.json
 If no configuration path is supplied, FeedCord looks for:
 
 ```text
-FeedCord/bin/<configuration>/net9.0/config/appsettings.json
+FeedCord/bin/<configuration>/net10.0/config/appsettings.json
 ```
 
 For local development, passing an explicit path is generally clearer.
@@ -202,6 +212,14 @@ Starting with empty checkpoints intentionally avoids replaying the current conte
 - A `400 Bad Request` triggers one text/forum payload fallback to detect an incorrect `Forum` setting.
 - Webhook IDs and tokens are redacted from application-generated URL logs.
 - Discord field lengths are clamped to API limits.
+- Discord mentions from feed content are disabled by default.
+- Invalid post, image, author, avatar, and footer URLs are omitted from payloads.
+
+## Network safety
+
+- Feed response bodies are limited to 10 MiB and must complete within 30 seconds.
+- Image-page scraping accepts only public HTTP or HTTPS destinations.
+- Redirects are handled explicitly and private-network redirect targets are rejected.
 
 ## Testing
 
@@ -247,6 +265,8 @@ The integration test posts one message. It does not print the webhook credential
 5. Start FeedCord and confirm that all configured instances pass validation.
 
 The first run can migrate `feed_dump.csv`. Keep the backup until the new `state/feed-state.json` file has been created successfully.
+
+Existing configurations that use `PersistenceOnShutdown` remain compatible. New configurations should use `PersistState`, which reflects that checkpoints are saved continuously after successful delivery as well as during graceful shutdown.
 
 ## Security notes
 

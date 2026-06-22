@@ -1,18 +1,24 @@
-# Set the desired platform for the build stage
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY ["FeedCord.csproj", "./"]
 COPY ["src", "./src"]
 
 RUN dotnet restore && \
-    dotnet build -c Release -o /app/build && \
-    dotnet publish -c Release -o /app/publish
+    dotnet publish -c Release -o /app/publish --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS final
 WORKDIR /app
+
 COPY --from=build /app/publish .
 
+RUN mkdir -p /app/config /app/state && \
+    chown -R $APP_UID:$APP_UID /app
+
+ENV FEEDCORD_HEALTH_FILE=/tmp/feedcord-health
+
+USER $APP_UID
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["dotnet", "FeedCord.dll", "--health-check"]
+
 ENTRYPOINT ["dotnet", "FeedCord.dll"]
-
-
-

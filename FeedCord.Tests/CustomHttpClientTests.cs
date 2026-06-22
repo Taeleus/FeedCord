@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using FeedCord.Infrastructure.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -97,6 +98,59 @@ public class CustomHttpClientTests
         Assert.DoesNotContain("secret-token", safe);
     }
 
+    [Fact]
+    public async Task GetAsyncWithFallback_RejectsResponseAboveMaximumSize()
+    {
+        var handler = new SequenceHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[11])
+        });
+        var client = new CustomHttpClient(
+            new NullLogger<CustomHttpClient>(),
+            new HttpClient(handler),
+            new SemaphoreSlim(1),
+            maxResponseBytes: 10);
+
+        using var response = await client.GetAsyncWithFallback("https://example.com/rss");
+
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public async Task GetAsyncWithFallback_TimesOutStalledResponseBody()
+    {
+        var handler = new SequenceHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StalledContent()
+        });
+        var client = new CustomHttpClient(
+            new NullLogger<CustomHttpClient>(),
+            new HttpClient(handler),
+            new SemaphoreSlim(1),
+            responseBodyTimeout: TimeSpan.FromMilliseconds(50));
+
+        using var response = await client.GetAsyncWithFallback("https://example.com/rss");
+
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public async Task GetPublicAsync_BlocksRedirectToPrivateNetwork()
+    {
+        var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+        redirect.Headers.Location = new Uri("http://127.0.0.1/admin");
+        var handler = new SequenceHandler(redirect);
+        var client = new CustomHttpClient(
+            new NullLogger<CustomHttpClient>(),
+            new HttpClient(handler),
+            new SemaphoreSlim(1));
+
+        using var response = await client.GetPublicAsync("http://93.184.216.34/image");
+
+        Assert.Null(response);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
     private sealed class SequenceHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
@@ -132,6 +186,30 @@ public class CustomHttpClientTests
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class StalledContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            System.Net.TransportContext? context)
+        {
+            return Task.Delay(Timeout.InfiniteTimeSpan);
+        }
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            System.Net.TransportContext? context,
+            CancellationToken cancellationToken)
+        {
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
         }
     }
 }

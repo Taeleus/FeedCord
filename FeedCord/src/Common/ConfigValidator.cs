@@ -4,6 +4,30 @@ namespace FeedCord.Common;
 
 public static class ConfigValidator
 {
+    public static void ValidateInstances(IReadOnlyCollection<Config> configs)
+    {
+        ArgumentNullException.ThrowIfNull(configs);
+
+        if (configs.Count == 0)
+            throw new ValidationException("At least one feed instance must be configured.");
+
+        var duplicateIds = configs
+            .Where(config => !string.IsNullOrWhiteSpace(config.Id))
+            .GroupBy(config => config.Id.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+
+        if (duplicateIds.Length > 0)
+        {
+            throw new ValidationException(
+                $"Instance IDs must be unique. Duplicates: {string.Join(", ", duplicateIds)}");
+        }
+
+        foreach (var config in configs)
+            Validate(config);
+    }
+
     public static void Validate(Config config)
     {
         ArgumentNullException.ThrowIfNull(config);

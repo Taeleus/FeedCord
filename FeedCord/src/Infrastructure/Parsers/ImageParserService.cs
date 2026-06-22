@@ -1,5 +1,6 @@
 ﻿using System.Xml.Linq;
 using FeedCord.Services.Interfaces;
+using FeedCord.Infrastructure.Http;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 
@@ -99,7 +100,7 @@ namespace FeedCord.Infrastructure.Parsers
             if (imgNode == null)
                 return string.Empty;
 
-            var src = imgNode.GetAttributeValue("src", null);
+            var src = imgNode.GetAttributeValue("src", string.Empty);
 
             return !string.IsNullOrWhiteSpace(src) ? src : string.Empty;
         }
@@ -114,7 +115,7 @@ namespace FeedCord.Infrastructure.Parsers
             try
             {
                 // Download HTML
-                using var response = await _httpClient.GetAsyncWithFallback(pageUrl, cancellationToken);
+                using var response = await _httpClient.GetPublicAsync(pageUrl, cancellationToken);
 
                 if (response is null) return string.Empty;
 
@@ -138,7 +139,10 @@ namespace FeedCord.Infrastructure.Parsers
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error scraping image from webpage: {PageUrl}", pageUrl);
+                _logger.LogWarning(
+                    ex,
+                    "Error scraping image from webpage: {PageUrl}",
+                    CustomHttpClient.SafeUrl(pageUrl));
             }
 
             return string.Empty;
@@ -195,25 +199,25 @@ namespace FeedCord.Infrastructure.Parsers
         private static string? GetMetaTagContent(HtmlDocument doc, string attributeKey, string attributeValue)
         {
             var metaNode = doc.DocumentNode.SelectSingleNode($"//meta[@{attributeKey}='{attributeValue}']");
-            return metaNode?.GetAttributeValue("content", null);
+            return metaNode?.GetAttributeValue("content", string.Empty);
         }
 
         private static string? GetLinkRel(HtmlDocument doc, string relValue)
         {
             var linkNode = doc.DocumentNode.SelectSingleNode($"//link[@rel='{relValue}']");
-            return linkNode?.GetAttributeValue("href", null);
+            return linkNode?.GetAttributeValue("href", string.Empty);
         }
 
         private static string? GetFirstImg(HtmlDocument doc)
         {
             var imgNode = doc.DocumentNode.SelectSingleNode("//img[@src]");
-            return imgNode?.GetAttributeValue("src", null);
+            return imgNode?.GetAttributeValue("src", string.Empty);
         }
 
         private static string? GetFirstImageWithAttribute(HtmlDocument doc, string attributeName)
         {
             var imgNode = doc.DocumentNode.SelectSingleNode($"//img[@{attributeName}]");
-            return imgNode?.GetAttributeValue(attributeName, null);
+            return imgNode?.GetAttributeValue(attributeName, string.Empty);
         }
 
         private static string? GetElementById(HtmlDocument doc, string elementId)
@@ -221,10 +225,10 @@ namespace FeedCord.Infrastructure.Parsers
             var node = doc.GetElementbyId(elementId);
             if (node != null)
             {
-                var src = node.GetAttributeValue("src", null);
+                var src = node.GetAttributeValue("src", string.Empty);
                 if (!string.IsNullOrWhiteSpace(src))
                     return src;
-                src = node.GetAttributeValue("data-src", null);
+                src = node.GetAttributeValue("data-src", string.Empty);
                 return src;
             }
             return null;

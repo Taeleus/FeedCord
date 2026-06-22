@@ -10,6 +10,7 @@ using FeedCord.Infrastructure.Factories;
 using FeedCord.Services.Interfaces;
 using FeedCord.Infrastructure.Parsers;
 using FeedCord.Infrastructure.Persistence;
+using FeedCord.Infrastructure.Workers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -41,7 +42,7 @@ namespace FeedCord
         {
             builder.SetBasePath(AppDomain.CurrentDomain.BaseDirectory);
             builder.AddJsonFile(args.Length == 1 ? args[0] : "config/appsettings.json", optional: false,
-                reloadOnChange: true);
+                reloadOnChange: false);
         }
 
         private static void SetupLogging(HostBuilderContext ctx, ILoggingBuilder logging)
@@ -61,7 +62,7 @@ namespace FeedCord
             services.AddHttpClient("Default", httpClient =>
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
-            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler() { AllowAutoRedirect = true });
+            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler() { AllowAutoRedirect = false });
 
             var concurrentRequests = ConfigValidator.ValidateGlobalConcurrency(
                 ctx.Configuration.GetValue("ConcurrentRequests", 20));
@@ -73,6 +74,7 @@ namespace FeedCord
 
             services.AddSingleton(new SemaphoreSlim(concurrentRequests));
             services.AddSingleton<IFeedStateStore, JsonFeedStateStore>();
+            services.AddHostedService<HealthHeartbeatWorker>();
 
             services.AddSingleton<IBatchLogger, BatchLogger>(sp =>
             {
@@ -103,13 +105,13 @@ namespace FeedCord
             var configs = ctx.Configuration.GetSection("Instances")
                 .Get<List<Config>>() ?? new List<Config>();
 
+            ConfigValidator.ValidateInstances(configs);
+
             Console.WriteLine($"Number of configurations loaded: {configs.Count}");
 
             foreach (var c in configs)
             {
                 Console.WriteLine($"Validating & Registering Background Service {c.Id}");
-
-                ConfigValidator.Validate(c);
 
                 services.AddSingleton<IHostedService>(sp =>
                 {

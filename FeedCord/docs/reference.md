@@ -1,4 +1,4 @@
-﻿
+
 ## appsettings.json reference
 
 Your `appsettings.json` is a collection of `instances`:
@@ -9,6 +9,8 @@ Your `appsettings.json` is a collection of `instances`:
 }
 ```
 Each Discord Channel is considered one instance, and gets one Webhook:
+
+At least one instance is required, and every `Id` must be unique regardless of letter casing.
 
 ```
 {
@@ -49,7 +51,7 @@ Here is an example of running two news channels:
 			"DescriptionLimit": 200,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": false
+			"PersistState": false
 		},
 		{
 			"Id": "Tech News Channel",
@@ -67,7 +69,7 @@ Here is an example of running two news channels:
 			"DescriptionLimit": 200,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": false
+			"PersistState": false
 		}
 	],
 	
@@ -94,7 +96,7 @@ Some properties are required while others are optional. A bare-bones `appsetting
 			"DescriptionLimit": 500,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": true
+			"PersistState": true
 		}
 	],
 	"ConcurrentRequests": 40
@@ -151,7 +153,7 @@ Post filters are useful if you are looking to sift out specific content from an 
 			"DescriptionLimit": 500,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": true,
+			"PersistState": true,
 			"ConcurrentRequests": 10,
 			"PostFilters": [
 			{
@@ -190,7 +192,7 @@ Here is an example of two urls with each their own filter:
 			"DescriptionLimit": 500,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": true,
+			"PersistState": true,
 			"ConcurrentRequests": 10,
 			"PostFilters": [
 			{
@@ -229,7 +231,7 @@ Luckily you can simply do this to do a filter for all feeds - set `Url` equal to
 			"DescriptionLimit": 500,
 			"Forum": true,
 			"MarkdownFormat": false,
-			"PersistenceOnShutdown": true,
+			"PersistState": true,
 			"ConcurrentRequests": 10,
 			"PostFilters": [
 			{
@@ -255,11 +257,13 @@ Luckily you can simply do this to do a filter for all feeds - set `Url` equal to
 - **YoutubeUrls**: The list of RSS Feeds you want to get posts from.
 - **DiscordWebhookUrl**: The created Webhook from your designated Discord Text Channel.
 - **RssCheckIntervalMinutes**: How often you want to check for new Posts from all of your Url feeds in minutes.
-- **Color**: Color of the Post's embedded message.
+- **Color**: Decimal color of the embedded message, from 0 through 16777215.
 - **DescriptionLimit**: Limits the length of the description of the post to this number.
 - **Forum**: Determines if the post will be sent to a Forum type channel.
 - **MarkdownFormat**: If set true, will post feed item in markdown instead of an Embed.
-- **PersistenceOnShutdown**: If set true, stores delivery checkpoints after successful posts and during graceful shutdown. Checkpoints use UTC publication times plus feed item IDs, so separate items sharing a timestamp are not skipped. Mount `/app/state` when using Docker so checkpoints survive container replacement.
+- **PersistState**: If set true, stores delivery checkpoints after successful posts and during graceful shutdown. Checkpoints use UTC publication times plus feed item IDs, so separate items sharing a timestamp are not skipped. Mount `/app/state` when using Docker so checkpoints survive container replacement.
+
+`PersistenceOnShutdown` remains accepted as a legacy alias for `PersistState`.
 
 ### Optional
 

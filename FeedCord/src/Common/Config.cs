@@ -4,6 +4,8 @@ namespace FeedCord.Common
 {
     public class Config
     {
+        private bool _persistState;
+
         [Required(ErrorMessage = "The 'Id' Property is required. \"Id\": \"MyFeedName\"")]
         public required string Id { get; set; }
 
@@ -26,6 +28,7 @@ namespace FeedCord.Common
         public string? AuthorUrl { get; set; }
         public string? FallbackImage { get; set; }
         public string? FooterImage { get; set; }
+        [Range(0, 16777215, ErrorMessage = "Color must be between 0 and 16777215.")]
         public int Color { get; set; }
         public bool EnableAutoRemove { get; set; }
 
@@ -36,8 +39,18 @@ namespace FeedCord.Common
         public bool Forum { get; set; }
         [Required(ErrorMessage = "Markdown Property is required (True for Markdown Posts, False for Embed Posts)")]
         public bool MarkdownFormat { get; set; }
-        [Required(ErrorMessage = "PersistenceOnShutdown Property is required (True for saving last scan date, False for new instance data on startup)")]
-        public bool PersistenceOnShutdown { get; set; }
+        public bool PersistState
+        {
+            get => _persistState;
+            set => _persistState = value;
+        }
+
+        [Obsolete("Use PersistState. This alias remains for existing appsettings.json files.")]
+        public bool PersistenceOnShutdown
+        {
+            get => _persistState;
+            set => _persistState = value;
+        }
         public List<PostFilters>? PostFilters { get; set; }
         public Dictionary<string, string[]>? Pings { get; set; }
         [Range(1, 100, ErrorMessage = "ConcurrentRequests must be between 1 and 100.")]

@@ -35,7 +35,7 @@ namespace FeedCord.Infrastructure.Workers
             _delayTime = config.RssCheckIntervalMinutes;
             _id = config.Id;
             _isInitialized = false;
-            _persistent = config.PersistenceOnShutdown;
+            _persistent = config.PersistState;
             _logAggregator = logAggregator;
 
             logger.LogInformation("{id} Created with check interval {Interval} minutes",
@@ -106,7 +106,6 @@ namespace FeedCord.Infrastructure.Workers
                 foreach (var feedGroup in posts.GroupBy(post => post.FeedUrl))
                 {
                     var orderedPosts = feedGroup.OrderBy(post => post.Post.PublishDate).ToList();
-                    var deliverySucceeded = true;
 
                     foreach (var pendingPost in orderedPosts)
                     {
@@ -117,15 +116,13 @@ namespace FeedCord.Infrastructure.Workers
                                 "{id}: Delivery failed for {PostUrl}; later posts from this feed will be retried",
                                 _id,
                                 pendingPost.Post.Link);
-                            deliverySucceeded = false;
                             break;
                         }
-                    }
 
-                    // Checkpoint the feed only after its complete batch succeeds. This avoids
-                    // losing posts that share a publication timestamp or follow a failed post.
-                    if (deliverySucceeded)
-                        await _feedManager.AcknowledgePostsAsync(orderedPosts, cancellationToken);
+                        // Persist progress after each accepted or filtered post. If a later post
+                        // fails, earlier successful posts are not duplicated on the next cycle.
+                        await _feedManager.AcknowledgePostsAsync([pendingPost], cancellationToken);
+                    }
                 }
             }
         }

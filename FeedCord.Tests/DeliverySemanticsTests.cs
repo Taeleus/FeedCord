@@ -267,7 +267,7 @@ public class DeliverySemanticsTests
     }
 
     [Fact]
-    public async Task FeedWorker_DoesNotCheckpointPartialBatch_WhenLaterDeliveryFails()
+    public async Task FeedWorker_CheckpointsSuccessfulPosts_BeforeLaterDeliveryFails()
     {
         var publishDate = DateTimeOffset.UtcNow;
         var first = new PendingPost("https://example.com/rss", CreatePost(publishDate));
@@ -295,7 +295,13 @@ public class DeliverySemanticsTests
 
         manager.Verify(
             service => service.AcknowledgePostsAsync(
-                It.IsAny<IReadOnlyCollection<PendingPost>>(),
+                It.Is<IReadOnlyCollection<PendingPost>>(posts =>
+                    posts.Count == 1 && posts.Contains(first)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        manager.Verify(
+            service => service.AcknowledgePostsAsync(
+                It.Is<IReadOnlyCollection<PendingPost>>(posts => posts.Contains(second)),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -328,7 +334,7 @@ public class DeliverySemanticsTests
             DescriptionLimit = 500,
             Forum = false,
             MarkdownFormat = false,
-            PersistenceOnShutdown = persistence
+            PersistState = persistence
         };
     }
 
